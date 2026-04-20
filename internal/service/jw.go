@@ -774,50 +774,67 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 
 	slog.Info("GetScorePage 请求参数", "semester", semester, "xn", xn, "xq", xq)
 
-	// 教务系统 xq 参数过滤无效，必须先拉全部再客户端过滤
-	// 因此无论是否指定学期，都先拉全部（xn/xq 都不传）
-	fetchAll := semester == ""
-
 	// 循环分页拿完全部成绩
 	// 教务系统忽略 rows 参数，硬编码每页最多 9 条，必须循环分页
+	allScores, err := s.fetchAllScores(session)
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Info("成绩获取完成", "total_collected", len(allScores))
+
+	// 缓存全部未过滤的成绩（BUG-7 修复：在过滤前缓存）
+	session.ScoreCache = &ScoreCache{
+		Data:   allScores,
+		Expire: time.Now().Add(15 * time.Minute),
+	}
+
+	// 客户端按学期过滤（xn+xq 组合精确匹配）
+	if semester != "" {
+		filtered := []model.Score{}
+		for _, sc := range allScores {
+			if sc.Year+"-"+sc.Semester == semester {
+				filtered = append(filtered, sc)
+			}
+		}
+		slog.Info("学期过滤后", "origin", len(allScores), "filtered", len(filtered), "target", semester)
+		return filtered, nil
+	}
+
+	return allScores, nil
+}
+
+// fetchAllScores 分页拉取全部成绩（独立函数确保每次 defer resp.Body.Close() 及时生效）
+func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 	allScores := []model.Score{}
 	page := 1
-	pageSize := 9 // 实际固定返回 9 条
+	pageSize := 9
 	totalRows := 0
-
-	// 用 map 做去重
 	seen := make(map[string]struct{})
 
 	for {
-		// 如果已经知道总数，且已获取足够，停止
 		if totalRows > 0 && len(allScores) >= totalRows {
 			slog.Info("成绩分页完成（已达到总数）", "total", totalRows, "collected", len(allScores))
 			break
 		}
 
-		// 最多循环 50 页保险
 		if page > 50 {
 			slog.Warn("成绩分页达到上限", "page", page)
 			break
 		}
 
-		// 尝试多种分页参数名和请求方法
 		start := (page - 1) * pageSize
 		queryParams := map[string]string{
 			"page":  strconv.Itoa(page),
 			"rows":  strconv.Itoa(pageSize),
 			"start": strconv.Itoa(start),
-			"p":     strconv.Itoa(page),        // 尝试 p 参数
-			"pn":    strconv.Itoa(page),        // 尝试 pn 参数
+			"p":     strconv.Itoa(page),
+			"pn":    strconv.Itoa(page),
+			"_":     strconv.FormatInt(time.Now().UnixMilli(), 10),
 		}
 
-		// 添加时间戳避免缓存
-		queryParams["_"] = strconv.FormatInt(time.Now().UnixMilli(), 10)
-
-		// 尝试 POST 请求（有些系统分页只支持 POST）
 		var resp *http.Response
 		if page == 1 {
-			// 第一页用 GET
 			req, err := http.NewRequest("GET", baseURL+"/studentportal.php/Jxxx/cjxxlb", nil)
 			if err != nil {
 				return nil, fmt.Errorf("构建成绩请求失败: %v", err)
@@ -834,8 +851,10 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 			req.URL.RawQuery = q.Encode()
 
 			resp, err = session.HttpClient.Do(req)
+			if err != nil {
+				return nil, fmt.Errorf("获取成绩失败: %v", err)
+			}
 		} else {
-			// 后续页尝试 POST
 			postData := url.Values{}
 			for k, v := range queryParams {
 				postData.Set(k, v)
@@ -851,11 +870,13 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 			postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 			resp, err = session.HttpClient.Do(postReq)
+			if err != nil {
+				return nil, fmt.Errorf("获取成绩失败: %v", err)
+			}
 		}
-		if err != nil {
-			return nil, fmt.Errorf("获取成绩失败: %v", err)
-		}
-		defer resp.Body.Close()
+
+		// BUG-2 修复：resp.Body.Close() 在循环内每次迭代结束立即关闭，不再累积
+		resp.Body.Close()
 
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -870,7 +891,6 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 			return nil, fmt.Errorf("解析成绩失败: %v", err)
 		}
 
-		// 记录总数（只在第一页）
 		if page == 1 && scoreResp.Total != "" {
 			totalRows, _ = strconv.Atoi(scoreResp.Total)
 			slog.Info("成绩总数", "total", totalRows)
@@ -883,7 +903,6 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 			break
 		}
 
-		// 检查是否全是重复数据（教务系统分页不工作时会一直返回相同的9条）
 		newCount := 0
 		for _, r := range scoreResp.Rows {
 			key := r.Xn + r.Xq + r.Kcmc
@@ -895,51 +914,28 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 				gpa, _ := strconv.ParseFloat(r.Cjjd, 64)
 
 				allScores = append(allScores, model.Score{
-					Year:      r.Xn,
-					Semester:  r.Xq,
+					Year:     r.Xn,
+					Semester: r.Xq,
 					ClassName: r.Ssbjmc,
-					Course:    r.Kcmc,
-					Nature:    r.Kcxz,
-					Credit:    credit,
-					Teacher:   r.Zdjsxm,
-					Grade:     r.Cj,
-					GPA:       gpa,
-					Type:      r.Cjsx,
+					Course:   r.Kcmc,
+					Nature:   r.Kcxz,
+					Credit:   credit,
+					Teacher:  r.Zdjsxm,
+					Grade:    r.Cj,
+					GPA:      gpa,
+					Type:     r.Cjsx,
 				})
 			}
 		}
 
 		slog.Info("成绩分页增量", "page", page, "new_count", newCount, "total_collected", len(allScores))
 
-		// 如果这一页没有新数据，说明分页不工作，停止
 		if newCount == 0 {
 			slog.Warn("成绩分页停止（无新数据，可能分页不工作）", "page", page)
 			break
 		}
 
 		page++
-	}
-
-	slog.Info("成绩获取完成", "total_collected", len(allScores))
-
-	// 客户端按学期过滤（xn+xq 组合精确匹配）
-	if semester != "" {
-		filtered := []model.Score{}
-		for _, s := range allScores {
-			if s.Year+"-"+s.Semester == semester {
-				filtered = append(filtered, s)
-			}
-		}
-		slog.Info("学期过滤后", "origin", len(allScores), "filtered", len(filtered), "target", semester)
-		allScores = filtered
-	}
-
-	// 缓存全部成绩（未过滤的完整数据）
-	if fetchAll {
-		session.ScoreCache = &ScoreCache{
-			Data:   allScores,
-			Expire: time.Now().Add(15 * time.Minute),
-		}
 	}
 
 	return allScores, nil
