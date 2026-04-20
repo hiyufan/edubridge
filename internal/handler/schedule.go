@@ -101,7 +101,10 @@ func (h *ScheduleHandler) GetFullSchedule(c *gin.Context) {
 
 	maxWeek := 20
 	if maxWeekStr := c.Query("maxWeek"); maxWeekStr != "" {
-		if m, err := strconv.Atoi(maxWeekStr); err == nil {
+		if m, err := strconv.Atoi(maxWeekStr); err == nil && m > 0 {
+			if m > 20 {
+				m = 20
+			}
 			maxWeek = m
 		}
 	}

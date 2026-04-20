@@ -598,11 +598,16 @@ func CalcRealCurrentWeek(semesterStart string, maxWeek int) int {
 
 // GetFullSchedule 获取全学期课表（并发）
 func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullSchedule, error) {
-	// 检查缓存
+	// 检查缓存（读锁范围覆盖整个深拷贝过程，防止返回值在锁外被并发修改）
 	s.mu.RLock()
-	if cache, ok := s.scheduleCache[sessionID]; ok && time.Now().Before(cache.Expire) {
+	cache, ok := s.scheduleCache[sessionID]
+	if ok && time.Now().Before(cache.Expire) {
+		// 深拷贝：防止返回的指针在锁释放后与写操作产生 data race
+		result := *cache.Data
+		result.Courses = make([]model.Course, len(cache.Data.Courses))
+		copy(result.Courses, cache.Data.Courses)
 		s.mu.RUnlock()
-		return cache.Data, nil
+		return &result, nil
 	}
 	s.mu.RUnlock()
 
