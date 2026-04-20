@@ -17,8 +17,11 @@ func NewScoreHandler() *ScoreHandler {
 }
 
 func (h *ScoreHandler) GetScore(c *gin.Context) {
-	sessionID, _ := c.Get("sessionId")
-	sessionIDStr := sessionID.(string)
+	sessionIDStr, ok := getSessionID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "无效的会话")
+		return
+	}
 
 	semester := c.Query("semester")
 
@@ -45,8 +48,11 @@ func (h *ScoreHandler) GetScore(c *gin.Context) {
 }
 
 func (h *ScoreHandler) GetSemesters(c *gin.Context) {
-	sessionID, _ := c.Get("sessionId")
-	sessionIDStr := sessionID.(string)
+	sessionIDStr, ok := getSessionID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "无效的会话")
+		return
+	}
 
 	slog.Info("GetSemesters handler", "sessionID", sessionIDStr)
 

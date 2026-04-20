@@ -12,6 +12,16 @@ import (
 	"jww/pkg/response"
 )
 
+// getSessionID 安全提取 sessionId，带类型断言校验
+func getSessionID(c *gin.Context) (string, bool) {
+	val, exists := c.Get("sessionId")
+	if !exists {
+		return "", false
+	}
+	id, ok := val.(string)
+	return id, ok
+}
+
 type AuthHandler struct {
 	jwtSecret        string
 	jwtRefreshSecret string
@@ -79,6 +89,10 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 	claims := &middleware.Claims{}
 	token, err := jwt.ParseWithClaims(refreshTokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+		// SEC-1: 校验签名算法，防止 alg:none 攻击
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
 		return []byte(h.jwtRefreshSecret), nil
 	})
 
@@ -113,11 +127,15 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	})
 }
 
+// signToken 使用 *middleware.Claims 结构体签发 Token（与解析方保持一致）
 func (h *AuthHandler) signToken(uid, sessionId, secret string, expire time.Duration) (string, error) {
-	claims := jwt.MapClaims{
-		"uid":       uid,
-		"sessionId": sessionId,
-		"exp":       time.Now().Add(expire).Unix(),
+	claims := &middleware.Claims{
+		UID:       uid,
+		SessionID: sessionId,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expire)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

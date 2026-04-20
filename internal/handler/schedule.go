@@ -16,8 +16,11 @@ func NewScheduleHandler() *ScheduleHandler {
 }
 
 func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
-	sessionID, _ := c.Get("sessionId")
-	sessionIDStr := sessionID.(string)
+	sessionIDStr, ok := getSessionID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "无效的会话")
+		return
+	}
 
 	weekStr := c.Query("week")
 	var week *int
@@ -90,8 +93,11 @@ func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 }
 
 func (h *ScheduleHandler) GetFullSchedule(c *gin.Context) {
-	sessionID, _ := c.Get("sessionId")
-	sessionIDStr := sessionID.(string)
+	sessionIDStr, ok := getSessionID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "无效的会话")
+		return
+	}
 
 	maxWeek := 20
 	if maxWeekStr := c.Query("maxWeek"); maxWeekStr != "" {
