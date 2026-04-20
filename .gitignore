@@ -1,0 +1,13 @@
+node_modules/
+frontend/node_modules/
+frontend/dist/
+*.log
+.DS_Store
+
+# Go
+jw-server
+*.exe
+
+# 敏感文件
+cookies.txt
+.env
