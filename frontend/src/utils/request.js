@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '../router'
+import { useUserStore } from '../stores/user'
 
 const request = axios.create({
   baseURL: '/api',
@@ -26,9 +27,10 @@ const processRefreshQueue = (token) => {
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    // VUE-1 修复：从 Pinia 内存读取 token，不从 localStorage
+    const userStore = useUserStore()
+    if (userStore.token) {
+      config.headers.Authorization = `Bearer ${userStore.token}`
     }
     return config
   },
@@ -84,14 +86,18 @@ request.interceptors.response.use(
         })
 
         if (data.status === 1) {
-          localStorage.setItem('token', data.token)
+          // VUE-1 修复：刷新成功后更新 Pinia 内存，不写 localStorage
+          const userStore = useUserStore()
+          userStore.setUser({ token: data.token, uid: userStore.uid })
           processRefreshQueue(data.token)
           originalConfig.headers.Authorization = `Bearer ${data.token}`
           return request(originalConfig)
         }
       } catch (refreshError) {
         processRefreshQueue(null)
-        localStorage.removeItem('token')
+        // 刷新失败时清空 Pinia token
+        const userStore = useUserStore()
+        userStore.logout()
         ElMessage.error('登录已过期，请重新登录')
         router.push('/login')
         return Promise.reject(refreshError)

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Login from '../views/Login.vue'
 import MainLayout from '../layout/MainLayout.vue'
+import { useUserStore } from '../stores/user'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -39,10 +40,12 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('token')
-  if (!token && to.path !== '/login') {
+  // 从 Pinia 内存读取 token（VUE-1 修复：不再从 localStorage 读取）
+  const userStore = useUserStore()
+  const hasToken = !!userStore.token
+  if (!hasToken && to.path !== '/login') {
     next('/login')
-  } else if (token && to.path === '/login') {
+  } else if (hasToken && to.path === '/login') {
     next('/')
   } else {
     next()

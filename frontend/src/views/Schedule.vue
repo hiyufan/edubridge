@@ -1,12 +1,14 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import axios from 'axios'
 import request from '../utils/request'
 
 const currentWeek = ref(1)
 const maxWeek = 20
 const scheduleData = ref(null)
 const loading = ref(false)
+const scheduleController = ref(null)
 
 const weeks = computed(() => Array.from({ length: maxWeek }, (_, i) => i + 1))
 
@@ -34,10 +36,18 @@ const getCourseColor = (name) => {
 }
 
 const fetchSchedule = async (week) => {
+  // VUE-4 修复：取消上一个 pending 请求，避免旧响应覆盖新数据
+  if (scheduleController.value) {
+    scheduleController.value.abort()
+  }
+  scheduleController.value = new AbortController()
+
   loading.value = true
   try {
     const url = week ? `/schedule?week=${week}` : '/schedule'
-    const res = await request.get(url)
+    const res = await request.get(url, {
+      signal: scheduleController.value.signal
+    })
     scheduleData.value = res.data
     // 仅在首次加载（后端自动判断当前周）时使用后端返回的周数
     // 切换周数时不再覆盖，保持 UI 和 URL 一致
@@ -45,6 +55,9 @@ const fetchSchedule = async (week) => {
       currentWeek.value = res.data.currentWeek
     }
   } catch (error) {
+    if (axios.isCancel(error)) {
+      return
+    }
     ElMessage.error('获取课表失败')
   } finally {
     loading.value = false
