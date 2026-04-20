@@ -1,14 +1,20 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"jww/config"
 	"jww/internal/handler"
 	"jww/internal/middleware"
+	"jww/internal/service"
 )
 
 func main() {
@@ -54,7 +60,12 @@ func main() {
 				valid = append(valid, t)
 			}
 		}
-		loginAttempts[ip] = valid
+		// BUG-8 修复：过滤后无记录则删除该 IP，防止内存无限增长
+		if len(valid) == 0 {
+			delete(loginAttempts, ip)
+		} else {
+			loginAttempts[ip] = valid
+		}
 
 		if len(valid) >= 10 {
 			loginAttemptsMu.Unlock()
@@ -82,7 +93,12 @@ func main() {
 				valid = append(valid, t)
 			}
 		}
-		captchaAttempts[ip] = valid
+		// 同样修复：过滤后无记录则删除
+		if len(valid) == 0 {
+			delete(captchaAttempts, ip)
+		} else {
+			captchaAttempts[ip] = valid
+		}
 
 		if len(valid) >= 100 {
 			captchaAttemptsMu.Unlock()
@@ -133,7 +149,30 @@ func main() {
 	})
 
 	log.Printf("Server starting on http://localhost:%s", cfg.Port)
-	if err := r.Run(":" + cfg.Port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+
+	// 停止 JwService 后台 goroutine
+	service.GetJwService().Close()
+
+	log.Println("Server exited gracefully")
 }

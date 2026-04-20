@@ -61,9 +61,10 @@ type ScoreCache struct {
 
 // JwService 教务服务
 type JwService struct {
-	sessions     map[string]*Session
-	mu           sync.RWMutex
+	sessions      map[string]*Session
+	mu            sync.RWMutex
 	scheduleCache map[string]*ScheduleCache
+	stopCh        chan struct{}
 }
 
 type ScheduleCache struct {
@@ -74,30 +75,42 @@ type ScheduleCache struct {
 // NewJwService 创建服务实例
 func NewJwService() *JwService {
 	svc := &JwService{
-		sessions:     make(map[string]*Session),
+		sessions:      make(map[string]*Session),
 		scheduleCache: make(map[string]*ScheduleCache),
+		stopCh:        make(chan struct{}),
 	}
 	go svc.cleanup()
 	return svc
 }
 
-// cleanup 定期清理过期会话
+// Close 停止后台 goroutine
+func (s *JwService) Close() {
+	close(s.stopCh)
+}
+
+// cleanup 定期清理过期会话（BUG-6 修复：有退出 channel）
 func (s *JwService) cleanup() {
 	ticker := time.NewTicker(time.Minute)
-	for range ticker.C {
-		s.mu.Lock()
-		now := time.Now()
-		for id, session := range s.sessions {
-			if now.After(session.ExpireTime) {
-				delete(s.sessions, id)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			now := time.Now()
+			for id, session := range s.sessions {
+				if now.After(session.ExpireTime) {
+					delete(s.sessions, id)
+				}
 			}
-		}
-		for id, cache := range s.scheduleCache {
-			if now.After(cache.Expire) {
-				delete(s.scheduleCache, id)
+			for id, cache := range s.scheduleCache {
+				if now.After(cache.Expire) {
+					delete(s.scheduleCache, id)
+				}
 			}
+			s.mu.Unlock()
 		}
-		s.mu.Unlock()
 	}
 }
 
