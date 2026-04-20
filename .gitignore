@@ -11,3 +11,4 @@ jw-server
 # 敏感文件
 cookies.txt
 .env
+package-lock.json
