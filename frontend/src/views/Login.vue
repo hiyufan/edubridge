@@ -8,6 +8,8 @@ import { useUserStore } from '../stores/user'
 const router = useRouter()
 const userStore = useUserStore()
 
+// B12 修复：不再从 localStorage 读取 sessionId，login 时直接从 request 对象获取实时值
+
 const loginForm = ref({
   username: '',
   password: '',
@@ -40,12 +42,11 @@ onMounted(() => {
 })
 
 const handleLogin = async () => {
-  const sessionId = localStorage.getItem('sessionId') || ''
   if (!loginForm.value.username || !loginForm.value.password || !loginForm.value.captcha) {
     ElMessage.warning('请填写完整信息')
     return
   }
-  if (!sessionId) {
+  if (!request.sessionId) {
     ElMessage.warning('验证码已过期，请刷新验证码')
     return
   }
@@ -57,7 +58,7 @@ const handleLogin = async () => {
       password: loginForm.value.password,
       captcha: loginForm.value.captcha,
       loginType: loginTypes[activeLoginType.value].value,
-      sessionId
+      sessionId: request.sessionId
     }
     const res = await request.post('/auth/login', payload)
     userStore.setUser({

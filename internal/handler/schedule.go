@@ -26,7 +26,8 @@ func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 	var week *int
 	if weekStr != "" {
 		w, err := strconv.Atoi(weekStr)
-		if err == nil {
+		// B11 修复：week 参数范围校验，防止 0 或负数下发给教务系统
+		if err == nil && w >= 1 && w <= 30 {
 			week = &w
 		}
 	}

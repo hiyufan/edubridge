@@ -29,10 +29,11 @@ var (
 
 // 预编译的正则表达式
 var (
-	reTitle      = regexp.MustCompile(`(.+?班)\s*(.+?)同学\s*第(\d+)周\s*课程表\((.+?)\)`)
-	reSemester   = regexp.MustCompile(`(\d+-\d+)第(\d+)学期`)
+	reTitle       = regexp.MustCompile(`(.+?班)\s*(.+?)同学\s*第(\d+)周\s*课程表\((.+?)\)`)
+	reSemester    = regexp.MustCompile(`(\d+-\d+)第(\d+)学期`)
 	reScheduleURL = regexp.MustCompile(`xn/([^/]+)/xq/(\d+)/dqz/(\d+)/sybmdmstr/([^/]+)/bjmc/(.+)`)
-	reJSURL      = regexp.MustCompile(`['"]\/studentportal\.php\/Jxxx\/xskbxx[^'"]*['"]`)
+	reJSURL       = regexp.MustCompile(`['"]\/studentportal\.php\/Jxxx\/xskbxx[^'"]*['"]`)
+	reDate        = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})`) // B6: 提升包级避免重复编译
 )
 
 // GetJwService 获取单例
@@ -255,9 +256,13 @@ func (s *JwService) Login(sessionID, username, password, captcha, loginType stri
 
 	// 访问 gotourl 建立完整 session
 	if result.Gotourl != "" {
-		session.HttpClient.Get(result.Gotourl)
+		if _, err := session.HttpClient.Get(result.Gotourl); err != nil {
+			slog.Warn("gotourl 跳转失败", "url", result.Gotourl, "err", err)
+		}
 	} else {
-		session.HttpClient.Get(baseURL + "/studentportal.php/Main/")
+		if _, err := session.HttpClient.Get(baseURL + "/studentportal.php/Main/"); err != nil {
+			slog.Warn("Main 页面访问失败", "err", err)
+		}
 	}
 
 	s.mu.Lock()
@@ -330,7 +335,10 @@ func (s *JwService) fetchScheduleParams(session *Session) (*ScheduleParams, erro
 
 	// 情况1：入口页直接是课表
 	if strings.Contains(html, "课程表") {
-		doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+		if err != nil {
+			return nil, fmt.Errorf("HTML 解析失败: %w", err)
+		}
 		title := doc.Find(".f2.b").Text()
 
 		matches := reTitle.FindStringSubmatch(title)
@@ -361,7 +369,10 @@ func (s *JwService) fetchScheduleParams(session *Session) (*ScheduleParams, erro
 
 	// 尝试从 HTML 中的链接提取（使用闭包捕获结果）
 	var foundParams *ScheduleParams
-	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, fmt.Errorf("HTML 解析失败: %w", err)
+	}
 	doc.Find("a[href], iframe[src]").EachWithBreak(func(i int, sel *goquery.Selection) bool {
 		href, _ := sel.Attr("href")
 		if href == "" {
@@ -451,9 +462,7 @@ func (s *JwService) ParseSchedule(html string) (*model.Schedule, error) {
 	colOccupied := make(map[int]int)
 	dayHeaders := make([]int, 7)
 	dayDates := make([]string, 7) // 存储每天的日期 "2026-04-13"
-
-	// 预编译日期正则（用于从 HTML 中提取 <br/> 后的日期）
-	reDate := regexp.MustCompile(`(\d{4}-\d{2}-\d{2})`)
+	_ = reDate                     // 引用包级变量，避免编译器优化移除
 
 	// 解析表头（包含日期）
 	doc.Find("table tr").First().Find("td").Each(func(i int, td *goquery.Selection) {
@@ -551,7 +560,8 @@ func (s *JwService) ParseSchedule(html string) (*model.Schedule, error) {
 				})
 
 				if rowspan > 1 {
-					colOccupied[colIdx] = rowspan - 1
+					// B10 修复：累加而非覆盖，保留之前同一列其他行占用的 rowspan
+					colOccupied[colIdx] += rowspan - 1
 				}
 			}
 			colIdx++
@@ -674,17 +684,38 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 					params.XN, params.XQ, w, params.Sybmdmstr, url.QueryEscape(params.Bjmc),
 				)
 
-				resp, err := session.Client.R().Get(scheduleURL)
-				if err != nil || !strings.Contains(resp.String(), "课程表") {
+				// B3 修复：不使用共享的 resty.Client（并发不安全），改用 session.HttpClient
+				req, err := http.NewRequest("GET", baseURL+scheduleURL, nil)
+				if err != nil {
+					return
+				}
+				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+				req.Header.Set("Accept", "text/html,*/*")
+				req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+				req.Header.Set("Referer", baseURL+"/")
+
+				resp, err := session.HttpClient.Do(req)
+				if err != nil || resp == nil {
+					return
+				}
+				defer resp.Body.Close()
+
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
 					return
 				}
 
-				parsed, err := s.ParseSchedule(resp.String())
+				if !strings.Contains(string(body), "课程表") {
+					return
+				}
+
+				parsed, err := s.ParseSchedule(string(body))
 				if err != nil || parsed == nil {
 					return
 				}
 
 				mu.Lock()
+				defer mu.Unlock()
 				fetchedWeeks++
 				if semester == "" {
 					semester = parsed.Semester
@@ -707,7 +738,6 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 						courseMap[key] = &courseWithWeeks{course: c, weeks: []int{w}}
 					}
 				}
-				mu.Unlock()
 			}(start)
 		}
 
@@ -880,10 +910,8 @@ func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 			}
 		}
 
-		// BUG-2 修复：resp.Body.Close() 在循环内每次迭代结束立即关闭，不再累积
-		resp.Body.Close()
-
 		bodyBytes, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("读取成绩响应失败: %v", err)
 		}
@@ -974,7 +1002,20 @@ func (j *jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	if j.cookies == nil {
 		j.cookies = make(map[string][]*http.Cookie)
 	}
-	j.cookies[u.Host] = cookies
+	// B2 修复：合并而非覆盖，以新 cookie name 为准，不存在则追加
+	existing := j.cookies[u.Host]
+	cookieMap := make(map[string]*http.Cookie)
+	for _, c := range existing {
+		cookieMap[c.Name] = c
+	}
+	for _, c := range cookies {
+		cookieMap[c.Name] = c
+	}
+	merged := make([]*http.Cookie, 0, len(cookieMap))
+	for _, c := range cookieMap {
+		merged = append(merged, c)
+	}
+	j.cookies[u.Host] = merged
 }
 
 func (j *jar) Cookies(u *url.URL) []*http.Cookie {

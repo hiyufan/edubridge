@@ -48,6 +48,31 @@ func main() {
 	// 限速中间件（并发安全实现）
 	var loginAttemptsMu sync.Mutex
 	loginAttempts := make(map[string][]time.Time)
+
+	// B9 修复：启动后台 goroutine，每 10 分钟清理一次 loginAttempts map，防止无限增长
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			loginAttemptsMu.Lock()
+			for ip, times := range loginAttempts {
+				window := time.Now().Add(-5 * time.Minute)
+				valid := make([]time.Time, 0)
+				for _, t := range times {
+					if t.After(window) {
+						valid = append(valid, t)
+					}
+				}
+				if len(valid) == 0 {
+					delete(loginAttempts, ip)
+				} else {
+					loginAttempts[ip] = valid
+				}
+			}
+			loginAttemptsMu.Unlock()
+		}
+	}()
+
 	loginLimiter := func(c *gin.Context) {
 		ip := c.ClientIP()
 		now := time.Now()

@@ -9,6 +9,9 @@ const request = axios.create({
   withCredentials: true
 })
 
+// B12 修复：sessionId 存内存，不写 localStorage；挂载在 request 对象上供各模块访问
+request.sessionId = ''
+
 // Token 刷新状态管理
 let isRefreshing = false
 let refreshQueue = []
@@ -68,9 +71,9 @@ request.interceptors.response.use(
   (response) => {
     const res = response.data
 
-    // 验证码接口
+    // 验证码接口 — B12 修复：移除 localStorage，写入内存变量而非持久化存储
     if (response.config.url === '/captcha' && res.sessionId) {
-      localStorage.setItem('sessionId', res.sessionId)
+      request.sessionId = res.sessionId
     }
 
     // 业务逻辑错误

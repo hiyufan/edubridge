@@ -14,8 +14,7 @@ export const useUserStore = defineStore('user', () => {
   function logout() {
     token.value = ''
     uid.value = ''
-    // 清理 sessionId（验证码会话标识）
-    localStorage.removeItem('sessionId')
+    // B12 修复：不再使用 localStorage 存储 sessionId，无需清理
   }
 
   return { token, uid, setUser, logout }

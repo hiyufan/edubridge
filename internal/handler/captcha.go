@@ -23,7 +23,10 @@ func (h *CaptchaHandler) GetCaptcha(c *gin.Context) {
 	if err != nil || sessionID == "" {
 		// 生成新的 session ID
 		sessionIDBytes := make([]byte, 16)
-		rand.Read(sessionIDBytes)
+		if _, err := rand.Read(sessionIDBytes); err != nil {
+			response.Error(c, 500, "生成 sessionID 失败")
+			return
+		}
 		sessionID = hex.EncodeToString(sessionIDBytes)
 	}
 
