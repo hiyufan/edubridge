@@ -155,10 +155,12 @@ func main() {
 			// iCal 订阅
 			protected.GET("/schedule/ical", scheduleHandler.GetICal)
 			protected.POST("/schedule/ical/token", scheduleHandler.GenerateICalToken)
+			protected.GET("/schedule/ical/token-info", scheduleHandler.GetICalTokenInfo)
 
 			// Webhook
 			protected.POST("/webhook/register", scheduleHandler.RegisterWebhook)
 			protected.POST("/webhook/trigger", scheduleHandler.TriggerWebhook)
+			protected.GET("/webhook/info", scheduleHandler.GetWebhookInfo)
 			protected.GET("/schedule/diff", scheduleHandler.GetScheduleDiff)
 		}
 	}
