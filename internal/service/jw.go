@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1068,7 +1069,7 @@ func parseScoreRows(rows []struct {
 			out = append(out, model.Score{
 				Year: r.Xn, Semester: r.Xq, ClassName: r.Ssbjmc,
 				Course: r.Kcmc, Nature: r.Kcxz, Credit: credit,
-				Teacher: r.Zdjsxm, Grade: fmt.Sprintf("%v", r.Cj),
+				Teacher: r.Zdjsxm, Grade: r.Cj,
 				GPA: gpa, Type: r.Cjsx,
 			})
 		}
