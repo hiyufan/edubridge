@@ -506,6 +506,7 @@ onMounted(async () => {
     border-radius: 6px;
     justify-content: flex-start;
     gap: 1px;
+    overflow: visible;
   }
 
   .course-name {
@@ -714,11 +715,6 @@ onMounted(async () => {
   text-align: center;
   line-height: 1.25;
   width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 .course-room {
@@ -728,10 +724,6 @@ onMounted(async () => {
   text-align: center;
   line-height: 1.2;
   width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .note-indicator {
