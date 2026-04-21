@@ -1,0 +1,11 @@
+services:
+  jww:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET required}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET required}
+      - PORT=3000
+      - JW_URL=https://jw.fzrjxy.com
