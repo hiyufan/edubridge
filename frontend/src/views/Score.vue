@@ -114,31 +114,40 @@ const drawTrendChart = () => {
   if (!trendCanvas.value || !scoreStats.value?.semesterStats?.length) return
   const canvas = trendCanvas.value
   const ctx = canvas.getContext('2d')
-  const w = canvas.width
-  const h = canvas.height
-  const padding = { top: 20, right: 20, bottom: 40, left: 45 }
+  const dpr = window.devicePixelRatio || 1
+  const w = canvas.offsetWidth
+  const h = 200
+
+  // 设置高分辨率画布
+  canvas.width = w * dpr
+  canvas.height = h * dpr
+  canvas.style.width = w + 'px'
+  canvas.style.height = h + 'px'
+  ctx.scale(dpr, dpr)
+
   const data = scoreStats.value.semesterStats
   const labels = data.map(s => s.semester)
   const values = data.map(s => s.gpa)
-
-  ctx.clearRect(0, 0, w, h)
-
-  // 背景
-  ctx.fillStyle = '#fafafa'
-  ctx.fillRect(0, 0, w, h)
-
+  const n = labels.length
+  const padding = { top: 24, right: 24, bottom: 40, left: 40 }
   const chartW = w - padding.left - padding.right
   const chartH = h - padding.top - padding.bottom
+  const yMin = 0, yMax = 4.0
+  const xStep = n > 1 ? chartW / (n - 1) : 0
+  const yScale = (v) => padding.top + chartH - ((v - yMin) / (yMax - yMin)) * chartH
+  const xPos = (i) => padding.left + i * xStep
 
-  // Y 轴范围 0~4.5
-  const yMin = 0, yMax = 4.5
-  const xStep = chartW / (labels.length - 1 || 1)
-  const yScale = (v) => padding.top + chartH - (v - yMin) / (yMax - yMin) * chartH
+  // 坐标点
+  const pts = values.map((v, i) => ({ x: xPos(i), y: yScale(v) }))
 
-  // 网格线
-  ctx.strokeStyle = '#f0f0f0'
+  // --- 背景 ---
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, w, h)
+
+  // --- 柔和网格线 ---
+  ctx.strokeStyle = 'rgba(120, 120, 128, 0.1)'
   ctx.lineWidth = 1
-  for (let y = 0; y <= 4.5; y += 0.5) {
+  for (let y = 0; y <= 4; y += 1) {
     const py = yScale(y)
     ctx.beginPath()
     ctx.moveTo(padding.left, py)
@@ -146,44 +155,89 @@ const drawTrendChart = () => {
     ctx.stroke()
   }
 
-  // X 轴标签
+  // --- X 轴标签 ---
   ctx.fillStyle = '#8e8e93'
-  ctx.font = '11px -apple-system, sans-serif'
+  ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif'
   ctx.textAlign = 'center'
   labels.forEach((label, i) => {
-    const px = padding.left + i * xStep
-    ctx.fillText(label, px, h - padding.bottom + 16)
+    ctx.fillText(label, xPos(i), h - 8)
   })
 
-  // Y 轴标签
+  // --- Y 轴标签 ---
   ctx.textAlign = 'right'
-  for (let y = 0; y <= 4.5; y += 1) {
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif'
+  for (let y = 0; y <= 4; y += 1) {
     ctx.fillText(y.toFixed(1), padding.left - 6, yScale(y) + 4)
   }
 
-  // 折线
+  // --- 渐变填充区域 ---
+  if (n > 1) {
+    const grad = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom)
+    grad.addColorStop(0, 'rgba(0, 122, 255, 0.18)')
+    grad.addColorStop(1, 'rgba(0, 122, 255, 0.00)')
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x, h - padding.bottom)
+    pts.forEach(p => ctx.lineTo(p.x, p.y))
+    ctx.lineTo(pts[n - 1].x, h - padding.bottom)
+    ctx.closePath()
+    ctx.fillStyle = grad
+    ctx.fill()
+  }
+
+  // --- 贝塞尔平滑曲线 ---
   ctx.beginPath()
+  if (n === 1) {
+    ctx.arc(pts[0].x, pts[0].y, 3, 0, Math.PI * 2)
+  } else {
+    pts.forEach((p, i) => {
+      if (i === 0) {
+        ctx.moveTo(p.x, p.y)
+      } else {
+        const prev = pts[i - 1]
+        const cpX = (prev.x + p.x) / 2
+        ctx.bezierCurveTo(cpX, prev.y, cpX, p.y, p.x, p.y)
+      }
+    })
+  }
   ctx.strokeStyle = '#007AFF'
   ctx.lineWidth = 2.5
-  values.forEach((v, i) => {
-    const px = padding.left + i * xStep
-    const py = yScale(v)
-    if (i === 0) ctx.moveTo(px, py)
-    else ctx.lineTo(px, py)
-  })
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
   ctx.stroke()
 
-  // 数据点
-  values.forEach((v, i) => {
-    const px = padding.left + i * xStep
-    const py = yScale(v)
+  // --- 数据点 + 外发光 ---
+  pts.forEach((p, i) => {
+    // 外发光
+    const radGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 10)
+    radGrad.addColorStop(0, 'rgba(0, 122, 255, 0.35)')
+    radGrad.addColorStop(1, 'rgba(0, 122, 255, 0)')
     ctx.beginPath()
-    ctx.arc(px, py, 4, 0, Math.PI * 2)
+    ctx.arc(p.x, p.y, 10, 0, Math.PI * 2)
+    ctx.fillStyle = radGrad
+    ctx.fill()
+
+    // 白底
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2)
+    ctx.fillStyle = '#fff'
+    ctx.fill()
+
+    // 蓝点
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2)
     ctx.fillStyle = '#007AFF'
     ctx.fill()
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 2
-    ctx.stroke()
+
+    // GPA 数值标签
+    ctx.fillStyle = 'rgba(29, 29, 31, 0.75)'
+    ctx.font = '500 10px -apple-system, BlinkMacSystemFont, sans-serif'
+    ctx.textAlign = 'center'
+    const labelY = p.y - 12
+    if (labelY > padding.top + 5) {
+      ctx.fillText(values[i].toFixed(2), p.x, labelY)
+    } else {
+      ctx.fillText(values[i].toFixed(2), p.x, p.y + 16)
+    }
   })
 }
 
@@ -922,7 +976,7 @@ onMounted(async () => {
 .trend-card {
   background: white;
   border-radius: 16px;
-  padding: 16px;
+  padding: 20px 24px 16px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03);
 }
 
@@ -930,12 +984,13 @@ onMounted(async () => {
   font-size: 15px;
   font-weight: 600;
   color: #1d1d1f;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  letter-spacing: -0.2px;
 }
 
 .trend-canvas {
   width: 100%;
-  height: auto;
+  height: 200px;
   display: block;
 }
 
