@@ -476,8 +476,10 @@ onMounted(async () => {
 .schedule-body {
   display: grid;
   grid-template-columns: 44px repeat(7, minmax(0, 1fr));
-  grid-template-rows: 44px repeat(12, 64px);
+  grid-template-rows: 36px repeat(12, minmax(56px, 1fr));
   position: relative;
+  min-height: 0;
+  overflow: auto;
 }
 
 /* Header Row (row 1) */
@@ -522,7 +524,7 @@ onMounted(async () => {
 .day-cell {
   flex: 1;
   border-right: 0.5px solid rgba(0, 0, 0, 0.05);
-  min-height: 64px;
+  min-height: 56px;
 }
 
 .day-cell:last-child {
@@ -552,25 +554,27 @@ onMounted(async () => {
 
 /* Course Cards: in the flat grid */
 .course-card {
-  border-radius: 10px;
+  border-radius: 8px;
   border-left: 3px solid;
-  padding: 6px 8px;
+  padding: 4px 5px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  overflow: visible;
+  justify-content: flex-start;
+  overflow: hidden;
   cursor: pointer;
   z-index: 1;
   position: relative;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
+  gap: 1px;
   transition: transform 0.5s cubic-bezier(0.25, 0.1, 0.25, 1),
               box-shadow 0.5s cubic-bezier(0.25, 0.1, 0.25, 1),
               border-left-width 0.3s ease,
               filter 0.5s ease;
   will-change: transform, box-shadow;
+  min-height: 0;
 }
 
 .course-card:hover {
@@ -656,25 +660,31 @@ onMounted(async () => {
 }
 
 .course-name {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: #1d1d1f;
-  word-wrap: break-word;
-  word-break: break-word;
-  hyphens: auto;
+  word-break: break-all;
   text-align: center;
-  line-height: 1.3;
+  line-height: 1.25;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .course-room {
-  font-size: 10px;
+  font-size: 9px;
   color: #8e8e93;
-  word-wrap: break-word;
-  word-break: break-word;
-  hyphens: auto;
+  word-break: break-all;
   text-align: center;
-  line-height: 1.3;
-  margin-top: 2px;
+  line-height: 1.2;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .note-indicator {
