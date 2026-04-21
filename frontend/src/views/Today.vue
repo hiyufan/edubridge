@@ -10,22 +10,32 @@ const todayWeekday = ref('')
 
 const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-// VUE-7 修复：今日课程从 scheduleStore 读取，不再单独请求
-const todayCourses = computed(() => {
-  if (!scheduleStore.scheduleData?.courses) return []
-  const weekday = new Date().getDay() // 0=周日, 1=周一...
-  const dayOfWeek = weekday === 0 ? 7 : weekday // 转换为1=周一...7=周日
-  return scheduleStore.scheduleData.courses
-    .filter(c => c.dayOfWeek === dayOfWeek)
-    .sort((a, b) => a.periodStart - b.periodStart)
-})
+// VUE-7 修复：今日课程需要自己请求真实当前周数据，不复用 Schedule 缓存
+const todayCourses = ref([])
+const todayLoading = ref(true)
+const todayScheduleData = ref(null)
+
+const fetchTodayData = async () => {
+  todayLoading.value = true
+  try {
+    const data = await scheduleStore.fetchSchedule()
+    todayScheduleData.value = data || scheduleStore.scheduleData
+    const weekday = new Date().getDay() // 0=周日, 1=周一...
+    const dayOfWeek = weekday === 0 ? 7 : weekday
+    todayCourses.value = (todayScheduleData.value?.courses || [])
+      .filter(c => c.dayOfWeek === dayOfWeek)
+      .sort((a, b) => a.periodStart - b.periodStart)
+  } catch {
+    todayCourses.value = []
+  } finally {
+    todayLoading.value = false
+  }
+}
 
 // 无课提示
 const freeMessage = computed(() => {
-  if (!scheduleStore.scheduleData?.courses) return ''
-  const weekday = new Date().getDay()
-  const dayOfWeek = weekday === 0 ? 7 : weekday
-  const count = scheduleStore.scheduleData.courses.filter(c => c.dayOfWeek === dayOfWeek).length
+  const count = todayCourses.value.length
+  if (todayLoading.value) return ''
   if (count === 0) return '今日无课，好好休息 🎉'
   return `今日共 ${count} 节课`
 })
@@ -43,8 +53,9 @@ const courseColors = [
 // P6 修复：computed 缓存 name→color 映射，render 时不再重复 hash 计算
 const courseColorMap = computed(() => {
   const m = new Map()
-  if (!scheduleStore.scheduleData?.courses) return m
-  for (const c of scheduleStore.scheduleData.courses) {
+  const courses = todayScheduleData.value?.courses
+  if (!courses) return m
+  for (const c of courses) {
     if (!m.has(c.name)) {
       const hash = c.name.split('').reduce((a, ch) => a + ch.charCodeAt(0), 0)
       m.set(c.name, courseColors[hash % courseColors.length])
@@ -66,10 +77,7 @@ const formatDate = () => {
 
 onMounted(() => {
   formatDate()
-  // VUE-7 修复：从共享 scheduleStore 获取今日课表，不单独请求
-  if (!scheduleStore.scheduleData) {
-    scheduleStore.fetchSchedule()
-  }
+  fetchTodayData()
 })
 </script>
 
@@ -83,10 +91,10 @@ onMounted(() => {
           {{ todayWeekday }}
         </span>
       </div>
-      <div class="date-semester" v-if="scheduleStore.scheduleData">
-        <span>{{ scheduleStore.scheduleData.semester }}</span>
+      <div class="date-semester" v-if="todayScheduleData">
+        <span>{{ todayScheduleData.semester }}</span>
         <span class="date-dot">·</span>
-        <span>第 {{ scheduleStore.scheduleData.currentWeek }} 周</span>
+        <span>第 {{ todayScheduleData.currentWeek }} 周</span>
       </div>
       <div class="date-semester" v-else>
         <span class="loading-dots">加载中</span>
@@ -110,7 +118,7 @@ onMounted(() => {
     </div>
 
     <!-- Skeleton -->
-    <div v-if="scheduleStore.loading" class="courses-list">
+    <div v-if="todayLoading" class="courses-list">
       <div v-for="i in 3" :key="i" class="course-card-skeleton">
         <div class="sk-line sk-time"></div>
         <div class="sk-card"></div>

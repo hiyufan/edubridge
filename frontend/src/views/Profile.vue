@@ -1,10 +1,49 @@
 <script setup>
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../stores/user'
+import { useThemeStore } from '../stores/theme'
+import { getNotifyPermission, requestNotifyPermission } from '../utils/notifications'
+import request from '../utils/request'
 
 const router = useRouter()
 const userStore = useUserStore()
+const themeStore = useThemeStore()
+
+const studentName = ref('')
+const className = ref('')
+const notifyPermission = ref('default')
+
+onMounted(async () => {
+  try {
+    const res = await request.get('/auth/me')
+    if (res.data?.name) studentName.value = res.data.name
+    if (res.data?.className) className.value = res.data.className
+    if (studentName.value) {
+      userStore.setUser({ ...userStore, name: studentName.value, className: className.value })
+    }
+  } catch (e) {
+    // 忽略，Profile 降级显示 uid
+  }
+  notifyPermission.value = getNotifyPermission()
+})
+
+const handleNotify = async () => {
+  if (notifyPermission.value === 'granted') {
+    ElMessage.info('已开启课程提醒')
+    return
+  }
+  if (notifyPermission.value === 'denied') {
+    ElMessage.warning('通知已被浏览器拒绝，请在设置中开启')
+    return
+  }
+  const result = await requestNotifyPermission()
+  notifyPermission.value = result
+  if (result === 'granted') {
+    ElMessage.success('已开启课程提醒')
+  }
+}
 
 const handleLogout = async () => {
   try {
@@ -44,8 +83,8 @@ const getAvatarLetter = () => {
         <div class="avatar-ring"></div>
       </div>
       <div class="profile-info">
-        <h2 class="profile-name">{{ userStore.uid || '用户' }}</h2>
-        <p class="profile-role">学生</p>
+        <h2 class="profile-name">{{ studentName || userStore.uid || '用户' }}</h2>
+        <p class="profile-role">{{ className || '学生' }}</p>
       </div>
       <div class="profile-status">
         <span class="status-dot"></span>
@@ -67,6 +106,32 @@ const getAvatarLetter = () => {
           <div class="item-content">
             <span class="item-label">学号</span>
             <span class="item-value">{{ userStore.uid || '-' }}</span>
+          </div>
+        </div>
+        <div class="apple-grouped-item">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div class="item-content">
+            <span class="item-label">姓名</span>
+            <span class="item-value">{{ studentName || '-' }}</span>
+          </div>
+        </div>
+        <div class="apple-grouped-item">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <div class="item-content">
+            <span class="item-label">班级</span>
+            <span class="item-value">{{ className || '-' }}</span>
           </div>
         </div>
         <div class="apple-grouped-item">
@@ -96,6 +161,91 @@ const getAvatarLetter = () => {
       </div>
     </div>
 
+    <!-- Theme Settings -->
+    <div class="settings-section animate-apple-fade-in stagger-2">
+      <div class="apple-section-header">外观</div>
+      <div class="apple-grouped-list">
+        <div class="apple-grouped-item">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <circle cx="12" cy="12" r="5"/>
+              <line x1="12" y1="1" x2="12" y2="3"/>
+              <line x1="12" y1="21" x2="12" y2="23"/>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+              <line x1="1" y1="12" x2="3" y2="12"/>
+              <line x1="21" y1="12" x2="23" y2="12"/>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+          </div>
+          <div class="item-content" style="flex-direction:row;align-items:center;gap:8px;">
+            <span class="item-label">主题模式</span>
+            <div class="theme-modes">
+              <button
+                v-for="m in [{v:'light',l:'浅'},{v:'dark',l:'深'},{v:'auto',l:'自动'}]"
+                :key="m.v"
+                class="theme-mode-btn"
+                :class="{ active: themeStore.mode === m.v }"
+                @click="themeStore.setMode(m.v)"
+              >{{ m.l }}</button>
+            </div>
+          </div>
+        </div>
+        <div class="apple-grouped-item" style="flex-wrap:wrap;gap:8px;">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <circle cx="13.5" cy="6.5" r="3.5"/>
+              <circle cx="17.5" cy="10.5" r="2.5"/>
+              <circle cx="8.5" cy="7.5" r="4.5"/>
+              <circle cx="6.5" cy="12.5" r="5"/>
+            </svg>
+          </div>
+          <div class="item-content" style="flex-direction:row;align-items:center;gap:6px;flex:1;">
+            <span class="item-label">主题色</span>
+            <div class="color-swatches">
+              <button
+                v-for="c in themeStore.PRESET_COLORS"
+                :key="c.value"
+                class="color-swatch"
+                :style="{ background: c.value }"
+                :class="{ active: themeStore.primaryColor === c.value }"
+                @click="themeStore.setPrimaryColor(c.value)"
+              ></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Settings -->
+    <div class="settings-section animate-apple-fade-in stagger-2">
+      <div class="apple-section-header">通知</div>
+      <div class="apple-grouped-list">
+        <div class="apple-grouped-item item-clickable" @click="handleNotify">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+          </div>
+          <div class="item-content">
+            <span class="item-label">课程提醒</span>
+            <span class="item-value">{{
+              notifyPermission === 'granted' ? '已开启' :
+              notifyPermission === 'denied' ? '已被拒绝' : '未开启'
+            }}</span>
+          </div>
+          <div class="item-arrow">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Security Settings -->
     <div class="settings-section animate-apple-fade-in stagger-2">
       <div class="apple-section-header">安全设置</div>
       <div class="apple-grouped-list">
@@ -397,6 +547,65 @@ const getAvatarLetter = () => {
   width: 20px;
   height: 20px;
   margin-right: 8px;
+}
+
+/* Theme Mode Buttons */
+.theme-modes {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.theme-mode-btn {
+  padding: 4px 12px;
+  border: 1.5px solid #e5e5ea;
+  border-radius: 20px;
+  background: white;
+  font-size: 12px;
+  font-weight: 500;
+  color: #636366;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.theme-mode-btn.active {
+  background: #007AFF;
+  border-color: #007AFF;
+  color: white;
+  font-weight: 600;
+}
+
+.theme-mode-btn:hover:not(.active) {
+  border-color: #007AFF;
+  color: #007AFF;
+}
+
+/* Color Swatches */
+.color-swatches {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+}
+
+.color-swatch.active {
+  border-color: white;
+  box-shadow: 0 0 0 2px currentColor, 0 2px 6px rgba(0,0,0,0.2);
+  transform: scale(1.15);
+}
+
+.color-swatch:hover:not(.active) {
+  transform: scale(1.1);
 }
 </style>
 

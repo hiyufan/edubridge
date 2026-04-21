@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElDialog } from 'element-plus'
 import { useScheduleStore } from '../stores/schedule'
 import { storeToRefs } from 'pinia'
+import { generateICal, downloadICal } from '../utils/ical'
+import { getNote, saveNote, hasNote } from '../utils/notes'
 
 const scheduleStore = useScheduleStore()
 const { scheduleData, loading } = storeToRefs(scheduleStore)
@@ -48,6 +50,46 @@ const changeWeek = async (week) => {
   }
 }
 
+const handleExportICal = () => {
+  if (!scheduleData.value?.courses?.length) {
+    ElMessage.warning('课表为空，无法导出')
+    return
+  }
+  try {
+    const content = generateICal(scheduleData.value, scheduleData.value.studentName || '')
+    downloadICal(content, '课程表.ics')
+    ElMessage.success('已导出日历文件')
+  } catch {
+    ElMessage.error('导出失败')
+  }
+}
+
+// 备注相关
+const noteCourse = ref(null)
+const noteText = ref('')
+const showNoteDialog = ref(false)
+
+const openNoteDialog = (course) => {
+  noteCourse.value = course
+  noteText.value = getNote(course.name, course.dayOfWeek, course.periodStart)
+  showNoteDialog.value = true
+}
+
+const handleSaveNote = () => {
+  if (!noteCourse.value) return
+  saveNote(noteCourse.value.name, noteCourse.value.dayOfWeek, noteCourse.value.periodStart, noteText.value)
+  showNoteDialog.value = false
+  noteCourse.value = null
+  ElMessage.success(noteText.value ? '备注已保存' : '备注已删除')
+}
+
+const handleDeleteNote = () => {
+  noteText.value = ''
+  handleSaveNote()
+}
+
+const courseHasNote = (course) => hasNote(course.name, course.dayOfWeek, course.periodStart)
+
 onMounted(async () => {
   try {
     // C7 修复：首次加载使用 store，让后端计算真实当前周
@@ -74,6 +116,13 @@ onMounted(async () => {
         <div class="week-info" v-else>
           <span class="week-loading">加载中...</span>
         </div>
+        <button class="export-btn" @click="handleExportICal" title="导出日历">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
       </div>
 
       <div class="week-selector">
@@ -200,9 +249,11 @@ onMounted(async () => {
               backgroundColor: getCourseColor(course.name).light,
               borderLeftColor: getCourseColor(course.name).bg
             }"
+            @click="openNoteDialog(course)"
           >
             <span class="course-name">{{ course.name }}</span>
             <span class="course-room">{{ course.room }}</span>
+            <span v-if="courseHasNote(course)" class="note-indicator" title="有备注">✎</span>
             <div class="course-preview">
               <div class="preview-content">
                 <div class="preview-name">{{ course.name }}</div>
@@ -225,6 +276,35 @@ onMounted(async () => {
       </svg>
       <p>本周暂无课程安排</p>
     </div>
+
+    <!-- Note Dialog -->
+    <ElDialog
+      v-model="showNoteDialog"
+      :title="noteCourse ? '课程备注 - ' + noteCourse.name : '课程备注'"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <div class="note-dialog-content">
+        <div v-if="noteCourse" class="note-course-info">
+          <span class="note-course-name">{{ noteCourse.name }}</span>
+          <span class="note-course-detail">{{ noteCourse.room }} · 周{{ ['一','二','三','四','五','六','日'][noteCourse.dayOfWeek - 1] }} · 第{{ noteCourse.periodStart }}节</span>
+        </div>
+        <el-input
+          v-model="noteText"
+          type="textarea"
+          :rows="4"
+          placeholder="添加课程备注，如：需要带教材、实验课地点变更等"
+          maxlength="200"
+          show-word-limit
+        />
+      </div>
+      <template #footer>
+        <div class="note-dialog-footer">
+          <el-button v-if="noteText" type="danger" plain @click="handleDeleteNote">删除备注</el-button>
+          <el-button type="primary" @click="handleSaveNote">保存</el-button>
+        </div>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
@@ -244,6 +324,9 @@ onMounted(async () => {
 }
 
 .week-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 16px;
 }
 
@@ -306,6 +389,34 @@ onMounted(async () => {
 .week-nav-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+.export-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #f2f2f7;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.export-btn svg {
+  width: 16px;
+  height: 16px;
+  color: #007AFF;
+}
+
+.export-btn:hover {
+  background: #e5e5ea;
+}
+
+.export-btn:active {
+  transform: scale(0.95);
 }
 
 .week-display {
@@ -566,6 +677,15 @@ onMounted(async () => {
   margin-top: 2px;
 }
 
+.note-indicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 10px;
+  color: #007AFF;
+  opacity: 0.8;
+}
+
 /* Empty State */
 .empty-state {
   display: flex;
@@ -585,6 +705,39 @@ onMounted(async () => {
 
 .empty-state p {
   font-size: 15px;
+}
+
+/* Note Dialog */
+.note-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.note-course-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  background: #f2f2f7;
+  border-radius: 10px;
+}
+
+.note-course-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.note-course-detail {
+  font-size: 13px;
+  color: #8e8e93;
+}
+
+.note-dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 /* Skeleton Loading */
