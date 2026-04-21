@@ -256,12 +256,18 @@ func (s *JwService) Login(sessionID, username, password, captcha, loginType stri
 
 	// 访问 gotourl 建立完整 session
 	if result.Gotourl != "" {
-		if _, err := session.HttpClient.Get(result.Gotourl); err != nil {
-			slog.Warn("gotourl 跳转失败", "url", result.Gotourl, "err", err)
+		req, err := http.NewRequest("GET", result.Gotourl, nil)
+		if err == nil {
+			if _, err := session.HttpClient.Do(req); err != nil {
+				slog.Warn("gotourl 跳转失败", "url", result.Gotourl, "err", err)
+			}
 		}
 	} else {
-		if _, err := session.HttpClient.Get(baseURL + "/studentportal.php/Main/"); err != nil {
-			slog.Warn("Main 页面访问失败", "err", err)
+		req, err := http.NewRequest("GET", baseURL+"/studentportal.php/Main/", nil)
+		if err == nil {
+			if _, err := session.HttpClient.Do(req); err != nil {
+				slog.Warn("Main 页面访问失败", "err", err)
+			}
 		}
 	}
 
