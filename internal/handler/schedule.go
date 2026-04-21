@@ -55,9 +55,8 @@ func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 			realCurrentWeek = service.CalcRealCurrentWeek(parsed.SemesterStart, 20)
 		}
 
-		// 如果入口页直接是课表（EntryHtml），GetSchedulePage 已直接返回，无需二次请求
-		// 否则复用第一次拿到的 html，只在周数不同时才二次请求
-		if parsed.EntryHtml == "" && realCurrentWeek != parsed.DQZ {
+		// 入口页是参数页（无课程数据）时，用真实周号二次请求获取真实课表
+		if len(parsed.Courses) == 0 {
 			html, err = jwSvc.GetSchedulePage(sessionIDStr, &realCurrentWeek)
 			if err != nil {
 				response.Error(c, http.StatusInternalServerError, err.Error())

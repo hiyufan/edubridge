@@ -1054,7 +1054,7 @@ func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 
 func parseScoreRows(rows []struct {
 	Xn string `json:"xn"`; Xq string `json:"xq"`; Ssbjmc string `json:"ssbjmc"`
-	Kcmc string `json:"kcmc"`; Kcxz string `json:"kcxz"`; Kcxf string `json:"kcfxf"`
+	Kcmc string `json:"kcmc"`; Kcxz string `json:"kcxz"`; Kcxf string `json:"kcxf"`
 	Zdjsxm string `json:"zdjsxm"`; Cj any `json:"cj"`; Cjjd string `json:"cjjd"`
 	Cjsx string `json:"cjsx"`
 }, seen *sync.Map) []model.Score {
