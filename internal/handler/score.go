@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/gin-gonic/gin"
+	"jww/internal/model"
 	"jww/internal/service"
 	"jww/pkg/response"
 )
@@ -131,7 +132,7 @@ func (h *ScoreHandler) GetScoreStats(c *gin.Context) {
 
 	// 按学期分组
 	type semKey struct{ year, term string }
-	semMap := make(map[semKey][]any)
+	semMap := make(map[semKey][]model.Score)
 	for _, sc := range scores {
 		k := semKey{sc.Year, sc.Semester}
 		semMap[k] = append(semMap[k], sc)
@@ -156,7 +157,7 @@ func (h *ScoreHandler) GetScoreStats(c *gin.Context) {
 	})
 
 	var highestGPA, lowestGPA float64 = -1, 5
-	var highestCourse, lowestCourse any
+	var highestCourse, lowestCourse model.Score
 
 	for _, k := range keys {
 		courses := semMap[k]
@@ -165,30 +166,15 @@ func (h *ScoreHandler) GetScoreStats(c *gin.Context) {
 		var semFailed int
 
 		for _, sc := range courses {
-			s := sc.(any)
-			// 用反射获取 Credit 和 Grade
-			type scorer interface{ GetCredit() float64; GetGPA() float64 }
-			// 直接用字段访问
-			credit := 0.0
-			gpa := 0.0
-
-			// 用结构体字面量方式
-			scoreMap, ok := s.(map[string]any)
-			if ok {
-				if v, ok := scoreMap["credit"].(float64); ok {
-					credit = v
-				}
-				if v, ok := scoreMap["gpa"].(float64); ok {
-					gpa = v
-				}
-			}
+			credit := sc.Credit
+			gpa := sc.GPA
 
 			semCredits += credit
 			semWeighted += credit * gpa
 			if gpa > 0 {
 				semGPA += gpa
 			}
-			if isFailed(scoreMap["grade"]) {
+			if isFailed(sc.Grade) {
 				semFailed++
 				failedCount++
 			}
@@ -196,11 +182,11 @@ func (h *ScoreHandler) GetScoreStats(c *gin.Context) {
 			// 最高/最低
 			if gpa > 0 && (highestGPA < 0 || gpa > highestGPA) {
 				highestGPA = gpa
-				highestCourse = s
+				highestCourse = sc
 			}
 			if gpa > 0 && gpa < lowestGPA {
 				lowestGPA = gpa
-				lowestCourse = s
+				lowestCourse = sc
 			}
 		}
 
