@@ -24,6 +24,32 @@ const processRefreshQueue = (token) => {
   refreshQueue = []
 }
 
+// VUE-1 修复：页面初始化时，如果有 RefreshToken Cookie 则静默刷新
+const attemptSilentRefresh = async () => {
+  if (isRefreshing) return false
+  isRefreshing = true
+  try {
+    const { data } = await axios.post('/api/auth/refresh', {}, {
+      withCredentials: true,
+      baseURL: '/api'
+    })
+    if (data.status === 1) {
+      const userStore = useUserStore()
+      userStore.setUser({ token: data.token, uid: userStore.uid })
+      processRefreshQueue(data.token)
+      isRefreshing = false
+      return true
+    }
+  } catch {
+    processRefreshQueue(null)
+  }
+  isRefreshing = false
+  return false
+}
+
+// 导出静默刷新方法，供 main.js 在初始化时调用
+export { attemptSilentRefresh }
+
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {
@@ -49,8 +75,11 @@ request.interceptors.response.use(
 
     // 业务逻辑错误
     if (res.status === 0) {
-      ElMessage.error(res.info || '请求失败')
-      return Promise.reject(new Error(res.info))
+      // VUE-8 修复：TOKEN_EXPIRED 业务错误码不弹 toast，静默处理
+      if (res.code !== 'TOKEN_EXPIRED') {
+        ElMessage.error(res.info || res.message || '请求失败')
+      }
+      return Promise.reject(new Error(res.info || res.message))
     }
 
     return res
@@ -106,8 +135,14 @@ request.interceptors.response.use(
       }
     }
 
+    // VUE-8 修复：从响应 body 读取业务错误码，区分处理
+    const code = error.response?.data?.code
+    const serverMessage = error.response?.data?.info || error.response?.data?.message
     if (error.response?.status === 400) {
-      ElMessage.error(error.response?.data?.info || '请求失败')
+      // 业务错误，不一定是 TOKEN_EXPIRED
+      if (code !== 'TOKEN_EXPIRED') {
+        ElMessage.error(serverMessage || '请求失败')
+      }
     } else if (error.response?.status !== 401) {
       ElMessage.error(error.message || '网络错误')
     }

@@ -1,15 +1,34 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import request from '../utils/request'
-import { getPeriodTime, getCourseTimeRange } from '../utils/periods'
+import { getPeriodTime } from '../utils/periods'
+import { useScheduleStore } from '../stores/schedule'
 
-const scheduleData = ref(null)
-const loading = ref(false)
+const scheduleStore = useScheduleStore()
 const todayDate = ref('')
 const todayWeekday = ref('')
 
 const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+// VUE-7 修复：今日课程从 scheduleStore 读取，不再单独请求
+const todayCourses = computed(() => {
+  if (!scheduleStore.scheduleData?.courses) return []
+  const weekday = new Date().getDay() // 0=周日, 1=周一...
+  const dayOfWeek = weekday === 0 ? 7 : weekday // 转换为1=周一...7=周日
+  return scheduleStore.scheduleData.courses
+    .filter(c => c.dayOfWeek === dayOfWeek)
+    .sort((a, b) => a.periodStart - b.periodStart)
+})
+
+// 无课提示
+const freeMessage = computed(() => {
+  if (!scheduleStore.scheduleData?.courses) return ''
+  const weekday = new Date().getDay()
+  const dayOfWeek = weekday === 0 ? 7 : weekday
+  const count = scheduleStore.scheduleData.courses.filter(c => c.dayOfWeek === dayOfWeek).length
+  if (count === 0) return '今日无课，好好休息 🎉'
+  return `今日共 ${count} 节课`
+})
 
 // 课程颜色
 const courseColors = [
@@ -27,38 +46,6 @@ const getCourseColor = (name) => {
   return courseColors[hash % courseColors.length]
 }
 
-// 按节次排序的今日课程
-const todayCourses = computed(() => {
-  if (!scheduleData.value?.courses) return []
-  const weekday = new Date().getDay() // 0=周日, 1=周一...
-  const dayOfWeek = weekday === 0 ? 7 : weekday // 转换为1=周一...7=周日
-  return scheduleData.value.courses
-    .filter(c => c.dayOfWeek === dayOfWeek)
-    .sort((a, b) => a.periodStart - b.periodStart)
-})
-
-// 无课提示
-const freeMessage = computed(() => {
-  if (!scheduleData.value?.courses) return ''
-  const weekday = new Date().getDay()
-  const dayOfWeek = weekday === 0 ? 7 : weekday
-  const count = scheduleData.value.courses.filter(c => c.dayOfWeek === dayOfWeek).length
-  if (count === 0) return '今日无课，好好休息 🎉'
-  return `今日共 ${count} 节课`
-})
-
-const fetchTodaySchedule = async () => {
-  loading.value = true
-  try {
-    const res = await request.get('/schedule')
-    scheduleData.value = res.data
-  } catch (error) {
-    ElMessage.error('获取课表失败')
-  } finally {
-    loading.value = false
-  }
-}
-
 const formatDate = () => {
   const now = new Date()
   const month = now.getMonth() + 1
@@ -70,7 +57,10 @@ const formatDate = () => {
 
 onMounted(() => {
   formatDate()
-  fetchTodaySchedule()
+  // VUE-7 修复：从共享 scheduleStore 获取今日课表，不单独请求
+  if (!scheduleStore.scheduleData) {
+    scheduleStore.fetchSchedule()
+  }
 })
 </script>
 
@@ -84,10 +74,10 @@ onMounted(() => {
           {{ todayWeekday }}
         </span>
       </div>
-      <div class="date-semester" v-if="scheduleData">
-        <span>{{ scheduleData.semester }}</span>
+      <div class="date-semester" v-if="scheduleStore.scheduleData">
+        <span>{{ scheduleStore.scheduleData.semester }}</span>
         <span class="date-dot">·</span>
-        <span>第 {{ scheduleData.currentWeek }} 周</span>
+        <span>第 {{ scheduleStore.scheduleData.currentWeek }} 周</span>
       </div>
       <div class="date-semester" v-else>
         <span class="loading-dots">加载中</span>
@@ -111,7 +101,7 @@ onMounted(() => {
     </div>
 
     <!-- Skeleton -->
-    <div v-if="loading" class="courses-list">
+    <div v-if="scheduleStore.loading" class="courses-list">
       <div v-for="i in 3" :key="i" class="course-card-skeleton">
         <div class="sk-line sk-time"></div>
         <div class="sk-card"></div>
