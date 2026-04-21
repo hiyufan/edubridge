@@ -482,6 +482,37 @@ onMounted(async () => {
   overflow: auto;
 }
 
+/* Mobile: horizontal scroll, larger cells */
+@media (max-width: 640px) {
+  .schedule-body {
+    grid-template-columns: 44px repeat(7, 120px);
+    grid-template-rows: 40px repeat(12, 80px);
+    overflow-x: auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .day-header-cell {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .course-card {
+    padding: 6px 8px;
+    border-radius: 8px;
+  }
+
+  .course-name {
+    font-size: 13px;
+    -webkit-line-clamp: 2;
+  }
+
+  .course-room {
+    font-size: 11px;
+    -webkit-line-clamp: 1;
+  }
+}
+
 /* Header Row (row 1) */
 .schedule-corner {
   grid-column: 1;
