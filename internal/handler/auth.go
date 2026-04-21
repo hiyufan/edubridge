@@ -27,14 +27,16 @@ type AuthHandler struct {
 	jwtRefreshSecret string
 	jwtExpires       time.Duration
 	refreshExpires   time.Duration
+	secureCookie     bool // SEC-2 修复：从配置读取 Secure 标志
 }
 
-func NewAuthHandler(jwtSecret, jwtRefreshSecret string) *AuthHandler {
+func NewAuthHandler(jwtSecret, jwtRefreshSecret string, secureCookie bool) *AuthHandler {
 	return &AuthHandler{
 		jwtSecret:        jwtSecret,
 		jwtRefreshSecret: jwtRefreshSecret,
 		jwtExpires:       2 * time.Hour,
 		refreshExpires:   30 * 24 * time.Hour,
+		secureCookie:     secureCookie,
 	}
 }
 
@@ -68,14 +70,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 生成 Refresh Token 并设置 HttpOnly Cookie
+	// 生成 Refresh Token 并设置 HttpOnly Cookie（SEC-2 修复：Secure 标志从配置读取）
 	refreshToken, err := h.signToken(req.Username, req.SessionID, h.jwtRefreshSecret, h.refreshExpires)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "生成 Token 失败")
 		return
 	}
 
-	c.SetCookie("refreshToken", refreshToken, int(h.refreshExpires.Seconds()), "/", "", false, true)
+	c.SetCookie("refreshToken", refreshToken, int(h.refreshExpires.Seconds()), "/", "", h.secureCookie, true)
 
 	response.SuccessWithToken(c, accessToken, req.Username, int(h.jwtExpires.Seconds()))
 }
@@ -108,6 +110,14 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
+	// BUG-9 修复：Refresh Token 滑动更新 - 续签后重新签发 Refresh Token 并更新 Cookie 过期时间
+	newRefreshToken, err := h.signToken(claims.UID, claims.SessionID, h.jwtRefreshSecret, h.refreshExpires)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "生成 Token 失败")
+		return
+	}
+	c.SetCookie("refreshToken", newRefreshToken, int(h.refreshExpires.Seconds()), "/", "", h.secureCookie, true)
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":    1,
 		"token":     newAccessToken,
@@ -116,7 +126,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	c.SetCookie("refreshToken", "", -1, "/", "", false, true)
+	c.SetCookie("refreshToken", "", -1, "/", "", h.secureCookie, true)
 	response.SuccessWithInfo(c, "已退出登录")
 }
 

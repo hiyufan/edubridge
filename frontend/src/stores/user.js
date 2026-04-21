@@ -14,6 +14,8 @@ export const useUserStore = defineStore('user', () => {
   function logout() {
     token.value = ''
     uid.value = ''
+    // 清理 sessionId（验证码会话标识）
+    localStorage.removeItem('sessionId')
   }
 
   return { token, uid, setUser, logout }
