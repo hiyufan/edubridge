@@ -15,6 +15,14 @@ const studentName = ref('')
 const className = ref('')
 const notifyPermission = ref('default')
 
+// 功能 07: iCal 订阅信息
+const iCalTokenInfo = ref(null)
+
+// 功能 09: Webhook 配置
+const webhookUrl = ref('')
+const webhookSecret = ref('')
+const webhookInfo = ref(null)
+
 onMounted(async () => {
   try {
     const res = await request.get('/auth/me')
@@ -27,7 +35,52 @@ onMounted(async () => {
     // 忽略，Profile 降级显示 uid
   }
   notifyPermission.value = getNotifyPermission()
+
+  // 功能 07: 获取 iCal 订阅信息
+  try {
+    const icalRes = await request.get('/schedule/ical/token-info')
+    iCalTokenInfo.value = icalRes.data
+  } catch {}
+
+  // 功能 09: 获取 Webhook 信息
+  try {
+    const whRes = await request.get('/webhook/info')
+    webhookInfo.value = whRes.data
+    webhookUrl.value = whRes.data?.url || ''
+    webhookSecret.value = whRes.data?.secret || ''
+  } catch {}
 })
+
+// 功能 07: 重新生成 iCal token
+const regenerateICalToken = async () => {
+  try {
+    const res = await request.post('/schedule/ical/token')
+    iCalTokenInfo.value = res.data
+    ElMessage.success('订阅链接已重新生成')
+  } catch {
+    ElMessage.error('生成失败')
+  }
+}
+
+// 功能 09: 保存 Webhook
+const saveWebhook = async () => {
+  if (!webhookUrl.value) {
+    ElMessage.warning('请输入 Webhook URL')
+    return
+  }
+  try {
+    await request.post('/webhook/register', {
+      url: webhookUrl.value,
+      secret: webhookSecret.value
+    })
+    ElMessage.success('Webhook 配置已保存')
+    // 重新获取
+    const whRes = await request.get('/webhook/info')
+    webhookInfo.value = whRes.data
+  } catch {
+    ElMessage.error('保存失败')
+  }
+}
 
 const handleNotify = async () => {
   if (notifyPermission.value === 'granted') {
@@ -242,6 +295,93 @@ const getAvatarLetter = () => {
             </svg>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 功能 07: iCal 订阅信息 -->
+    <div class="settings-section animate-apple-fade-in stagger-2" v-if="iCalTokenInfo">
+      <div class="apple-section-header">日历订阅</div>
+      <div class="apple-grouped-list">
+        <div class="apple-grouped-item">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+            </svg>
+          </div>
+          <div class="item-content">
+            <span class="item-label">订阅状态</span>
+            <span class="item-value">已激活 · 有效期至 {{ iCalTokenInfo.expireAt }}</span>
+          </div>
+        </div>
+        <div class="apple-grouped-item item-clickable" @click="regenerateICalToken">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+          </div>
+          <div class="item-content">
+            <span class="item-label">重新生成订阅链接</span>
+          </div>
+          <div class="item-arrow">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 功能 09: Webhook 配置 -->
+    <div class="settings-section animate-apple-fade-in stagger-2">
+      <div class="apple-section-header">Webhook 推送</div>
+      <div class="apple-grouped-list">
+        <div class="apple-grouped-item">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+          </div>
+          <div class="item-content" style="flex-direction:column;gap:8px;">
+            <span class="item-label">Webhook URL</span>
+            <el-input v-model="webhookUrl" placeholder="https://example.com/webhook" size="small" />
+          </div>
+        </div>
+        <div class="apple-grouped-item">
+          <div class="item-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </div>
+          <div class="item-content" style="flex-direction:column;gap:8px;">
+            <span class="item-label">密钥（可选）</span>
+            <el-input v-model="webhookSecret" placeholder="签名密钥" size="small" />
+          </div>
+        </div>
+        <div class="apple-grouped-item item-clickable" @click="saveWebhook">
+          <div class="item-icon" style="background:rgba(0,122,255,0.1);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+          </div>
+          <div class="item-content">
+            <span class="item-label" style="color:#007AFF;">保存 Webhook 配置</span>
+          </div>
+        </div>
+        <!-- Webhook 历史 -->
+        <template v-if="webhookInfo?.history?.length">
+          <div v-for="(h, idx) in webhookInfo.history.slice(0, 3)" :key="idx" class="webhook-history-item">
+            <span class="wh-time">{{ h.time }}</span>
+            <span class="wh-summary">{{ h.summary }}</span>
+            <span :class="['wh-status', h.success ? 'success' : 'fail']">
+              {{ h.success ? '成功' : '失败' }}
+            </span>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -607,6 +747,37 @@ const getAvatarLetter = () => {
 .color-swatch:hover:not(.active) {
   transform: scale(1.1);
 }
+
+/* 功能 09: Webhook 历史 */
+.webhook-history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 12px;
+  border-top: 0.5px solid rgba(0,0,0,0.06);
+}
+
+.wh-time {
+  color: #8e8e93;
+  flex-shrink: 0;
+}
+
+.wh-summary {
+  flex: 1;
+  color: #636366;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wh-status {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.wh-status.success { color: #34C759; }
+.wh-status.fail { color: #FF3B30; }
 </style>
 
 <style>

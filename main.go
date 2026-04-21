@@ -114,6 +114,7 @@ func main() {
 	captchaHandler := handler.NewCaptchaHandler()
 	scheduleHandler := handler.NewScheduleHandler()
 	scoreHandler := handler.NewScoreHandler()
+	notifyHandler := handler.NewNotifyHandler()
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, cfg.JWTRefreshSecret)
 
 	// 限速中间件：C1 修复，改用工厂函数
@@ -127,6 +128,7 @@ func main() {
 		api.GET("/captcha", captchaLimiter, captchaHandler.GetCaptcha)
 		api.POST("/auth/login", loginLimiter, authHandler.Login)
 		api.POST("/auth/refresh", authHandler.Refresh) // 公开，依赖 refresh token 自己验证
+		api.GET("/schedule/ical/subscribe", scheduleHandler.SubscribeICal) // 公开，token 验证
 
 		// 需要认证的接口
 		protected := api.Group("")
@@ -139,10 +141,25 @@ func main() {
 			// 课表
 			protected.GET("/schedule", scheduleHandler.GetSchedule)
 			protected.GET("/schedule/full", scheduleHandler.GetFullSchedule)
+			protected.GET("/schedule/conflicts", scheduleHandler.GetConflicts)
 
 			// 成绩
 			protected.GET("/score", scoreHandler.GetScore)
 			protected.GET("/score/semesters", scoreHandler.GetSemesters)
+			protected.GET("/score/stats", scoreHandler.GetScoreStats)
+
+			// 通知
+			protected.POST("/notify/register", notifyHandler.RegisterToken)
+			protected.POST("/notify/test", notifyHandler.TestNotify)
+
+			// iCal 订阅
+			protected.GET("/schedule/ical", scheduleHandler.GetICal)
+			protected.POST("/schedule/ical/token", scheduleHandler.GenerateICalToken)
+
+			// Webhook
+			protected.POST("/webhook/register", scheduleHandler.RegisterWebhook)
+			protected.POST("/webhook/trigger", scheduleHandler.TriggerWebhook)
+			protected.GET("/schedule/diff", scheduleHandler.GetScheduleDiff)
 		}
 	}
 

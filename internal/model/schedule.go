@@ -58,3 +58,10 @@ type ScheduleParams struct {
 	Sybmdmstr string
 	Bjmc     string
 }
+
+// ConflictPair 课程冲突对
+type ConflictPair struct {
+	CourseA        Course `json:"courseA"`
+	CourseB        Course `json:"courseB"`
+	ConflictWeeks  []int  `json:"conflictWeeks"`
+}

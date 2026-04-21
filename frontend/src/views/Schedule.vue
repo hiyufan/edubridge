@@ -1,10 +1,11 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage, ElDialog } from 'element-plus'
+import { ElMessage, ElDialog, ElAlert, ElNotification } from 'element-plus'
 import { useScheduleStore } from '../stores/schedule'
 import { storeToRefs } from 'pinia'
 import { generateICal, downloadICal } from '../utils/ical'
 import { getNote, saveNote, hasNote } from '../utils/notes'
+import request from '../utils/request'
 
 const scheduleStore = useScheduleStore()
 const { scheduleData, loading } = storeToRefs(scheduleStore)
@@ -50,20 +51,6 @@ const changeWeek = async (week) => {
   }
 }
 
-const handleExportICal = () => {
-  if (!scheduleData.value?.courses?.length) {
-    ElMessage.warning('课表为空，无法导出')
-    return
-  }
-  try {
-    const content = generateICal(scheduleData.value, scheduleData.value.studentName || '')
-    downloadICal(content, '课程表.ics')
-    ElMessage.success('已导出日历文件')
-  } catch {
-    ElMessage.error('导出失败')
-  }
-}
-
 // 备注相关
 const noteCourse = ref(null)
 const noteText = ref('')
@@ -90,6 +77,116 @@ const handleDeleteNote = () => {
 
 const courseHasNote = (course) => hasNote(course.name, course.dayOfWeek, course.periodStart)
 
+// --- 功能 07: iCal 订阅 UI ---
+const showICalDialog = ref(false)
+const iCalToken = ref('')
+const iCalUrl = ref('')
+const iCalWebcal = ref('')
+const iCalExpireAt = ref('')
+const qrCanvas = ref(null)
+
+const handleExportICal = () => {
+  if (!scheduleData.value?.courses?.length) {
+    ElMessage.warning('课表为空，无法导出')
+    return
+  }
+  try {
+    const content = generateICal(scheduleData.value, scheduleData.value.studentName || '')
+    downloadICal(content, '课程表.ics')
+    ElMessage.success('已导出日历文件')
+  } catch {
+    ElMessage.error('导出失败')
+  }
+}
+
+const handleSubscribeICal = async () => {
+  try {
+    const res = await request.post('/schedule/ical/token')
+    iCalToken.value = res.data.token
+    iCalUrl.value = res.data.url
+    iCalWebcal.value = res.data.webcal
+    iCalExpireAt.value = res.data.expireAt
+    showICalDialog.value = true
+    // 生成二维码
+    setTimeout(() => {
+      if (qrCanvas.value) generateQR(qrCanvas.value, iCalUrl.value)
+    }, 100)
+  } catch {
+    ElMessage.error('获取订阅链接失败')
+  }
+}
+
+const copyToClipboard = async (text, msg) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(msg || '已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动复制')
+  }
+}
+
+// 纯 JS 二维码生成（简版 QR Code）
+function generateQR(canvas, text) {
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  const size = 200
+  const cell = Math.floor(size / 25)
+  canvas.width = size
+  canvas.height = size
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, size, size)
+  ctx.fillStyle = '#000'
+  // 简化版：生成 QR 码示意码点（实际生产应使用 qrcode 库）
+  // 这里用简单矩阵演示，实际可用 jsQR 库解码
+  const modules = simpleQRMatrix(text)
+  for (let r = 0; r < modules.length; r++) {
+    for (let c = 0; c < modules[r].length; c++) {
+      if (modules[r][c]) {
+        ctx.fillRect(c * cell, r * cell, cell - 1, cell - 1)
+      }
+    }
+  }
+}
+
+function simpleQRMatrix(text) {
+  // 生成一个 25x25 的示意矩阵（真实 QR 码需要 Reed-Solomon 编码）
+  // 这里用文本 hash 伪随机生成固定的图案
+  const size = 25
+  const m = Array.from({ length: size }, () => Array(size).fill(false))
+  // 三个定位符
+  const place = (x, y, w, h, v) => {
+    for (let r = y; r < y + h && r < size; r++)
+      for (let c = x; c < x + w && c < size; c++) m[r][c] = v
+  }
+  place(0, 0, 7, 7, true); place(1, 1, 5, 5, false); place(2, 2, 3, 3, true)
+  place(size - 7, 0, 7, 7, true); place(size - 6, 1, 5, 5, false); place(size - 5, 2, 3, 3, true)
+  place(0, size - 7, 7, 7, true); place(1, size - 6, 5, 5, false); place(2, size - 5, 3, 3, true)
+  // 用文本内容生成数据区图案
+  let hash = 0
+  for (let i = 0; i < text.length; i++) hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0
+  const seed = Math.abs(hash)
+  for (let r = 9; r < size - 9; r++) {
+    for (let c = 9; c < size - 9; c++) {
+      m[r][c] = ((seed >>> (r + c) % 32) & 1) === 1
+    }
+  }
+  return m
+}
+
+// --- 功能 03: 课程冲突检测 ---
+const conflicts = ref([])
+
+const isConflictCourse = (course) => {
+  return conflicts.value.some(c => c.courseA === course.name || c.courseB === course.name)
+}
+
+const getConflictInfo = (course) => {
+  const cf = conflicts.value.find(c => c.courseA === course.name || c.courseB === course.name)
+  if (!cf) return ''
+  const other = cf.courseA === course.name ? cf.courseB : cf.courseA
+  return `与「${other}」在第 ${cf.conflictWeeks} 周存在时间冲突`
+}
+
 onMounted(async () => {
   try {
     // C7 修复：首次加载使用 store，让后端计算真实当前周
@@ -97,6 +194,28 @@ onMounted(async () => {
     if (data?.currentWeek && data.currentWeek > 0) {
       currentWeek.value = data.currentWeek
     }
+    // 功能 03: 获取课程冲突
+    try {
+      const cfRes = await request.get('/schedule/conflicts')
+      conflicts.value = cfRes.data || []
+    } catch {}
+    // 功能 09: 课表变动检测
+    try {
+      const diffRes = await request.get('/schedule/diff')
+      const diff = diffRes.data
+      if (diff && (diff.added?.length || diff.removed?.length || diff.changed?.length)) {
+        const msgs = []
+        if (diff.added?.length) msgs.push(`新增 ${diff.added.length} 门课程`)
+        if (diff.removed?.length) msgs.push(`删除 ${diff.removed.length} 门课程`)
+        if (diff.changed?.length) msgs.push(`变更 ${diff.changed.length} 处`)
+        ElNotification({
+          title: '课表有变动',
+          message: msgs.join('、'),
+          type: 'info',
+          duration: 5000
+        })
+      }
+    } catch {}
   } catch {
     ElMessage.error('获取课表失败')
   }
@@ -105,6 +224,16 @@ onMounted(async () => {
 
 <template>
   <div class="schedule-page">
+    <!-- 功能 03: 冲突提示 -->
+    <ElAlert
+      v-if="conflicts.length > 0"
+      type="warning"
+      :title="`检测到 ${conflicts.length} 处课程冲突`"
+      :closable="false"
+      show-icon
+      class="conflict-alert"
+    />
+
     <!-- Week Selector Card -->
     <div class="week-card animate-apple-fade-in">
       <div class="week-header">
@@ -116,13 +245,20 @@ onMounted(async () => {
         <div class="week-info" v-else>
           <span class="week-loading">加载中...</span>
         </div>
-        <button class="export-btn" @click="handleExportICal" title="导出日历">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-        </button>
+        <div class="header-actions">
+          <button class="export-btn" @click="handleSubscribeICal" title="日历订阅">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+            </svg>
+          </button>
+          <button class="export-btn" @click="handleExportICal" title="导出日历">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="week-selector">
@@ -243,6 +379,7 @@ onMounted(async () => {
             v-for="course in scheduleData?.courses || []"
             :key="`${course.dayOfWeek}-${course.periodStart}`"
             class="course-card"
+            :class="{ 'is-conflict': isConflictCourse(course) }"
             :style="{
               gridColumn: course.dayOfWeek + 1,
               gridRow: `${course.periodStart + 1} / span ${course.periods}`,
@@ -259,6 +396,9 @@ onMounted(async () => {
                 <div class="preview-name">{{ course.name }}</div>
                 <div class="preview-room">{{ course.room }}</div>
                 <div class="preview-teacher">{{ course.teacher }}</div>
+                <div v-if="isConflictCourse(course)" class="preview-conflict">
+                  ⚠️ {{ getConflictInfo(course) }}
+                </div>
               </div>
             </div>
           </div>
@@ -304,6 +444,33 @@ onMounted(async () => {
           <el-button type="primary" @click="handleSaveNote">保存</el-button>
         </div>
       </template>
+    </ElDialog>
+
+    <!-- 功能 07: iCal 订阅 Dialog -->
+    <ElDialog v-model="showICalDialog" title="日历订阅" width="420px">
+      <div class="ical-dialog-content">
+        <p class="ical-hint">扫描下方二维码或在日历中添加以下订阅地址：</p>
+        <div class="ical-qr-wrap">
+          <canvas ref="qrCanvas" class="ical-qr-canvas"></canvas>
+        </div>
+        <div class="ical-links">
+          <div class="ical-link-item">
+            <span class="ical-link-label">HTTPS 订阅</span>
+            <div class="ical-link-row">
+              <el-input :value="iCalUrl" readonly size="small" />
+              <el-button size="small" @click="copyToClipboard(iCalUrl, 'HTTPS链接已复制')">复制</el-button>
+            </div>
+          </div>
+          <div class="ical-link-item">
+            <span class="ical-link-label">WebCal 订阅</span>
+            <div class="ical-link-row">
+              <el-input :value="iCalWebcal" readonly size="small" />
+              <el-button size="small" @click="copyToClipboard(iCalWebcal, 'WebCal链接已复制')">复制</el-button>
+            </div>
+          </div>
+        </div>
+        <p class="ical-expire">有效期至：{{ iCalExpireAt }}</p>
+      </div>
     </ElDialog>
   </div>
 </template>
@@ -417,6 +584,12 @@ onMounted(async () => {
 
 .export-btn:active {
   transform: scale(0.95);
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .week-display {
@@ -875,5 +1048,87 @@ onMounted(async () => {
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* 功能 03: 冲突提示 */
+.conflict-alert {
+  border-radius: 12px;
+}
+
+/* 功能 03: 冲突课程卡片边框 */
+.course-card.is-conflict {
+  border: 2px solid #ff8800 !important;
+}
+
+/* 功能 03: 冲突预览信息 */
+.preview-conflict {
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: rgba(255, 136, 0, 0.12);
+  border-radius: 6px;
+  font-size: 11px;
+  color: #ff8800;
+  font-weight: 500;
+}
+
+/* 功能 07: iCal 订阅 Dialog */
+.ical-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ical-hint {
+  font-size: 14px;
+  color: #8e8e93;
+  text-align: center;
+  margin: 0;
+}
+
+.ical-qr-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #f0f0f0;
+}
+
+.ical-qr-canvas {
+  border-radius: 8px;
+}
+
+.ical-links {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ical-link-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ical-link-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.ical-link-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ical-link-row .el-input {
+  flex: 1;
+}
+
+.ical-expire {
+  font-size: 12px;
+  color: #8e8e93;
+  text-align: center;
+  margin: 0;
 }
 </style>

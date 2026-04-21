@@ -7,6 +7,13 @@ const allScores = ref([])
 const selectedSemester = ref('')
 const loading = ref(false)
 
+// 功能 05: 成绩统计数据
+const scoreStats = ref(null)
+
+// 功能 05: GPA 模拟器
+const simGrades = ref({})
+const simSlider = ref(70)
+
 // 从全部成绩中派生学期列表
 const semesterListFromScores = computed(() => {
   const semesters = [...new Set(allScores.value.map(s => `${s.year}-${s.semester}`))]
@@ -51,6 +58,14 @@ const fetchAllScores = async () => {
   }
 }
 
+// 功能 05: 获取成绩统计
+const fetchScoreStats = async () => {
+  try {
+    const res = await request.get('/score/stats')
+    scoreStats.value = res.data
+  } catch {}
+}
+
 // GPA 详情计算
 const gpaDetail = computed(() => {
   const validScores = scoreList.value.filter(s => s.gpa > 0 && s.credit > 0)
@@ -92,12 +107,122 @@ const getGradeInfo = (grade) => {
   return { color: '#FF3B30', bg: 'rgba(255, 59, 48, 0.12)', label: '不及格' }
 }
 
+// 功能 05: 绘制 GPA 趋势图
+const trendCanvas = ref(null)
+
+const drawTrendChart = () => {
+  if (!trendCanvas.value || !scoreStats.value?.semesterStats?.length) return
+  const canvas = trendCanvas.value
+  const ctx = canvas.getContext('2d')
+  const w = canvas.width
+  const h = canvas.height
+  const padding = { top: 20, right: 20, bottom: 40, left: 45 }
+  const data = scoreStats.value.semesterStats
+  const labels = data.map(s => s.semester)
+  const values = data.map(s => s.gpa)
+
+  ctx.clearRect(0, 0, w, h)
+
+  // 背景
+  ctx.fillStyle = '#fafafa'
+  ctx.fillRect(0, 0, w, h)
+
+  const chartW = w - padding.left - padding.right
+  const chartH = h - padding.top - padding.bottom
+
+  // Y 轴范围 0~4.5
+  const yMin = 0, yMax = 4.5
+  const xStep = chartW / (labels.length - 1 || 1)
+  const yScale = (v) => padding.top + chartH - (v - yMin) / (yMax - yMin) * chartH
+
+  // 网格线
+  ctx.strokeStyle = '#f0f0f0'
+  ctx.lineWidth = 1
+  for (let y = 0; y <= 4.5; y += 0.5) {
+    const py = yScale(y)
+    ctx.beginPath()
+    ctx.moveTo(padding.left, py)
+    ctx.lineTo(w - padding.right, py)
+    ctx.stroke()
+  }
+
+  // X 轴标签
+  ctx.fillStyle = '#8e8e93'
+  ctx.font = '11px -apple-system, sans-serif'
+  ctx.textAlign = 'center'
+  labels.forEach((label, i) => {
+    const px = padding.left + i * xStep
+    ctx.fillText(label, px, h - padding.bottom + 16)
+  })
+
+  // Y 轴标签
+  ctx.textAlign = 'right'
+  for (let y = 0; y <= 4.5; y += 1) {
+    ctx.fillText(y.toFixed(1), padding.left - 6, yScale(y) + 4)
+  }
+
+  // 折线
+  ctx.beginPath()
+  ctx.strokeStyle = '#007AFF'
+  ctx.lineWidth = 2.5
+  values.forEach((v, i) => {
+    const px = padding.left + i * xStep
+    const py = yScale(v)
+    if (i === 0) ctx.moveTo(px, py)
+    else ctx.lineTo(px, py)
+  })
+  ctx.stroke()
+
+  // 数据点
+  values.forEach((v, i) => {
+    const px = padding.left + i * xStep
+    const py = yScale(v)
+    ctx.beginPath()
+    ctx.arc(px, py, 4, 0, Math.PI * 2)
+    ctx.fillStyle = '#007AFF'
+    ctx.fill()
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 2
+    ctx.stroke()
+  })
+}
+
+// 功能 05: GPA 模拟器计算
+const simGPA = computed(() => {
+  if (!scoreStats.value) return '0.00'
+  // 用当前学期有效成绩模拟
+  const validScores = scoreList.value.filter(s => s.credit > 0)
+  if (validScores.length === 0) return '0.00'
+  const totalCredits = validScores.reduce((sum, s) => sum + s.credit, 0)
+  const weightedSum = validScores.reduce((sum, s) => {
+    const grade = parseFloat(simGrades.value[s.course] || s.grade || 0)
+    const gpaVal = Math.min(4.0, Math.max(0, (grade - 50) / 10)).toFixed(2)
+    return sum + parseFloat(gpaVal) * s.credit
+  }, 0)
+  return (weightedSum / totalCredits).toFixed(2)
+})
+
+// 功能 05: 滑块统一调整
+const handleSimSlider = () => {
+  scoreList.value.forEach(s => {
+    if (s.credit > 0) {
+      simGrades.value[s.course] = simSlider.value
+    }
+  })
+}
+
 // 初始化
 onMounted(async () => {
   await fetchAllScores()
+  await fetchScoreStats()
   if (semesterListFromScores.value.length > 0) {
     selectedSemester.value = semesterListFromScores.value[0]
   }
+  // 初始化模拟成绩
+  scoreList.value.forEach(s => {
+    if (s.grade) simGrades.value[s.course] = s.grade
+  })
+  setTimeout(drawTrendChart, 100)
 })
 </script>
 
@@ -124,6 +249,59 @@ onMounted(async () => {
         <div class="stat-item">
           <span class="stat-value">{{ gpaDetail.passRate }}</span>
           <span class="stat-label">通过率</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 功能 05: 顶部统计 el-statistic -->
+    <div class="stats-row animate-apple-fade-in" v-if="scoreStats">
+      <div class="stat-card">
+        <span class="stat-card-value">{{ scoreStats.totalCredits || 0 }}</span>
+        <span class="stat-card-label">总学分</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card-value" :style="{ color: getGpaColor(scoreStats.weightedGPA) }">
+          {{ scoreStats.weightedGPA?.toFixed(2) || '0.00' }}
+        </span>
+        <span class="stat-card-label">加权 GPA</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-card-value" :style="{ color: scoreStats.failedCount > 0 ? '#FF3B30' : '#34C759' }">
+          {{ scoreStats.failedCount || 0 }}
+        </span>
+        <span class="stat-card-label">挂科数</span>
+      </div>
+    </div>
+
+    <!-- 功能 05: GPA 趋势图 -->
+    <div class="trend-card animate-apple-fade-in stagger-1" v-if="scoreStats?.semesterStats?.length">
+      <div class="trend-header">GPA 趋势</div>
+      <canvas ref="trendCanvas" width="600" height="200" class="trend-canvas"></canvas>
+    </div>
+
+    <!-- 功能 05: GPA 模拟器 -->
+    <div class="sim-card animate-apple-fade-in stagger-2" v-if="scoreList.length > 0">
+      <div class="sim-header">GPA 模拟器</div>
+      <div class="sim-result">
+        <span class="sim-result-value" :style="{ color: getGpaColor(simGPA) }">{{ simGPA }}</span>
+        <span class="sim-result-label">预测 GPA</span>
+      </div>
+      <div class="sim-slider-wrap">
+        <span class="sim-slider-label">调整分数：{{ simSlider }}</span>
+        <el-slider v-model="simSlider" :min="0" :max="100" :step="1" @input="handleSimSlider" />
+      </div>
+      <div class="sim-courses">
+        <div v-for="score in scoreList.filter(s => s.credit > 0)" :key="score.course" class="sim-course-row">
+          <span class="sim-course-name">{{ score.course }}</span>
+          <el-slider
+            v-model="simGrades[score.course]"
+            :min="0"
+            :max="100"
+            :step="1"
+            class="sim-course-slider"
+            size="small"
+          />
+          <span class="sim-course-grade">{{ simGrades[score.course] || 0 }}</span>
         </div>
       </div>
     </div>
@@ -708,5 +886,139 @@ onMounted(async () => {
 
 .empty-state p {
   font-size: 15px;
+}
+
+/* 功能 05: 统计行 */
+.stats-row {
+  display: flex;
+  gap: 12px;
+}
+
+.stat-card {
+  flex: 1;
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03);
+}
+
+.stat-card-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.stat-card-label {
+  font-size: 12px;
+  color: #8e8e93;
+  font-weight: 500;
+}
+
+/* 功能 05: GPA 趋势图 */
+.trend-card {
+  background: white;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03);
+}
+
+.trend-header {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d1d1f;
+  margin-bottom: 12px;
+}
+
+.trend-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* 功能 05: GPA 模拟器 */
+.sim-card {
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sim-header {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.sim-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.sim-result-value {
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.sim-result-label {
+  font-size: 13px;
+  color: #8e8e93;
+}
+
+.sim-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sim-slider-label {
+  font-size: 13px;
+  color: #8e8e93;
+}
+
+.sim-courses {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.sim-course-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sim-course-name {
+  font-size: 13px;
+  color: #1d1d1f;
+  width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sim-course-slider {
+  flex: 1;
+}
+
+.sim-course-grade {
+  font-size: 13px;
+  font-weight: 600;
+  color: #007AFF;
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
 }
 </style>

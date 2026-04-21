@@ -1,7 +1,9 @@
 package service
 
 import (
+	"crypto/hmac"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -58,6 +60,7 @@ type Session struct {
 	HttpClient  *http.Client
 	CookieJar   *jar
 	UID         string
+	PushToken   string
 	ExpireTime  time.Time
 	ScoreCache  *ScoreCache
 }
@@ -73,12 +76,35 @@ type JwService struct {
 	sessions      map[string]*Session
 	mu            sync.RWMutex
 	scheduleCache map[string]*ScheduleCache
+	webhookMu     sync.RWMutex
+	webhookStore  map[string]*webhookEntry
 	stopCh        chan struct{}
 }
 
 type ScheduleCache struct {
-	Data   *model.FullSchedule
-	Expire time.Time
+	Data      *model.FullSchedule
+	PrevData  *model.FullSchedule   // 上一次快照，用于 diff
+	LatestDiff *ScheduleDiff        // 最近一次变动差分
+	Expire    time.Time
+}
+
+// ScheduleDiff 课表变动差分
+type ScheduleDiff struct {
+	Added   []model.Course `json:"added"`
+	Removed []model.Course `json:"removed"`
+	Changed []CourseChange `json:"changed"`
+}
+
+// CourseChange 课程变更项
+type CourseChange struct {
+	Old model.Course `json:"old"`
+	New model.Course `json:"new"`
+}
+
+// webhookEntry webhook 注册项（service 包定义供 JwService 使用）
+type webhookEntry struct {
+	URL    string
+	Secret string
 }
 
 // NewJwService 创建服务实例
@@ -86,6 +112,7 @@ func NewJwService() *JwService {
 	svc := &JwService{
 		sessions:      make(map[string]*Session),
 		scheduleCache: make(map[string]*ScheduleCache),
+		webhookStore:  make(map[string]*webhookEntry),
 		stopCh:        make(chan struct{}),
 	}
 	go svc.cleanup()
@@ -95,6 +122,120 @@ func NewJwService() *JwService {
 // Close 停止后台 goroutine
 func (s *JwService) Close() {
 	close(s.stopCh)
+}
+
+// ForEachWebhook 遍历所有 webhook 注册（供 handler 调用）
+func (s *JwService) ForEachWebhook(fn func(url, secret string) bool) {
+	s.webhookMu.RLock()
+	defer s.webhookMu.RUnlock()
+	for _, entry := range s.webhookStore {
+		if !fn(entry.URL, entry.Secret) {
+			break
+		}
+	}
+}
+
+// RegisterWebhookURL 注册一个 webhook URL
+func (s *JwService) RegisterWebhookURL(sessionID, url, secret string) {
+	s.webhookMu.Lock()
+	s.webhookStore[sessionID] = &webhookEntry{
+		URL:    url,
+		Secret: secret,
+	}
+	s.webhookMu.Unlock()
+}
+
+// GetLatestScheduleDiff 获取最近一次课表变动
+func (s *JwService) GetLatestScheduleDiff(sessionID string) *ScheduleDiff {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if cache, ok := s.scheduleCache[sessionID]; ok {
+		return cache.LatestDiff
+	}
+	return nil
+}
+
+// computeScheduleDiff 计算两次课表快照的差分
+func computeScheduleDiff(old, new *model.FullSchedule) *ScheduleDiff {
+	if old == nil || new == nil {
+		return nil
+	}
+	if old == new {
+		return nil
+	}
+
+	diff := &ScheduleDiff{}
+
+	// 建立旧课表 map（按 name+dayOfWeek+periodStart 唯一标识）
+	oldMap := make(map[string]model.Course)
+	for _, c := range old.Courses {
+		key := courseKey(c)
+		oldMap[key] = c
+	}
+
+	newMap := make(map[string]model.Course)
+	for _, c := range new.Courses {
+		key := courseKey(c)
+		newMap[key] = c
+	}
+
+	// 新增：旧没有，新有
+	for key, c := range newMap {
+		if _, exists := oldMap[key]; !exists {
+			diff.Added = append(diff.Added, c)
+		}
+	}
+
+	// 删除：旧有，新没有
+	for key, c := range oldMap {
+		if _, exists := newMap[key]; !exists {
+			diff.Removed = append(diff.Removed, c)
+		}
+	}
+
+	// 变更：旧新都有，但 room/teacher 不同
+	for key, newC := range newMap {
+		if oldC, exists := oldMap[key]; exists {
+			if oldC.Room != newC.Room || oldC.Teacher != newC.Teacher {
+				diff.Changed = append(diff.Changed, CourseChange{Old: oldC, New: newC})
+			}
+		}
+	}
+
+	return diff
+}
+
+func courseKey(c model.Course) string {
+	return fmt.Sprintf("%s|%d|%d|%v", c.Name, c.DayOfWeek, c.PeriodStart, c.Weeks)
+}
+
+// triggerWebhooks 触发所有 webhook 推送（异步）
+func (s *JwService) triggerWebhooks(sessionID string, diff *ScheduleDiff) {
+	if diff == nil || (len(diff.Added) == 0 && len(diff.Removed) == 0 && len(diff.Changed) == 0) {
+		return
+	}
+	s.ForEachWebhook(func(url, secret string) bool {
+		body, _ := json.Marshal(diff)
+		req, _ := http.NewRequest("POST", url, strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		if secret != "" {
+			mac := hmac.New(sha256.New, []byte(secret))
+			mac.Write(body)
+			sig := hex.EncodeToString(mac.Sum(nil))
+			req.Header.Set("X-Hub-Signature-256", "sha256="+sig)
+		}
+		req.Header.Set("X-JWW-Event", "schedule-diff")
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Warn("Webhook push failed", "url", url, "err", err)
+			return true
+		}
+		defer resp.Body.Close()
+		io.ReadAll(resp.Body)
+		slog.Info("Webhook pushed", "url", url, "status", resp.StatusCode)
+		return true
+	})
 }
 
 // cleanup 定期清理过期会话（BUG-6 修复：有退出 channel）
@@ -170,6 +311,42 @@ func (s *JwService) getSession(sessionID string) *Session {
 		s.sessions[sessionID] = session
 	}
 	return session
+}
+
+// SetPushToken 设置用户的推送 token
+func (s *JwService) SetPushToken(sessionID, token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if session, ok := s.sessions[sessionID]; ok {
+		session.PushToken = token
+	}
+}
+
+// ForEachSession 遍历所有活跃会话（用于后台任务）
+func (s *JwService) ForEachSession(fn func(sessionID string, pushToken string) bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for id, session := range s.sessions {
+		if time.Now().After(session.ExpireTime) || session.UID == "" {
+			continue
+		}
+		if !fn(id, session.PushToken) {
+			break
+		}
+	}
+}
+
+// GetScheduleTimeInfo 获取课表时间信息（当前周和学期起始日）
+func (s *JwService) GetScheduleTimeInfo(sessionID string) (semesterStart string, currentWeek int, totalWeeks int) {
+	s.mu.RLock()
+	cache, ok := s.scheduleCache[sessionID]
+	if ok && cache.Data != nil {
+		semesterStart = cache.Data.SemesterStart
+		currentWeek = cache.Data.CurrentWeek
+		totalWeeks = cache.Data.TotalWeeks
+	}
+	s.mu.RUnlock()
+	return
 }
 
 // checkSession 验证会话是否有效
@@ -811,13 +988,29 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 		}
 	}
 
-	// 存入缓存
+	// 存入缓存（含 diff 检测）
 	s.mu.Lock()
+	var prevData *model.FullSchedule
+	if existing, hasExisting := s.scheduleCache[sessionID]; hasExisting {
+		prevData = existing.Data
+	}
+	diff := computeScheduleDiff(prevData, result)
 	s.scheduleCache[sessionID] = &ScheduleCache{
-		Data:   result,
-		Expire: time.Now().Add(serviceScheduleCacheTTL),
+		Data:       result,
+		PrevData:   prevData,
+		LatestDiff: diff,
+		Expire:     time.Now().Add(serviceScheduleCacheTTL),
 	}
 	s.mu.Unlock()
+
+	if diff != nil && (len(diff.Added) > 0 || len(diff.Removed) > 0 || len(diff.Changed) > 0) {
+		slog.Info("Schedule diff detected",
+			"sessionID", sessionID,
+			"added", len(diff.Added),
+			"removed", len(diff.Removed),
+			"changed", len(diff.Changed))
+		go s.triggerWebhooks(sessionID, diff)
+	}
 
 	return result, nil
 }
