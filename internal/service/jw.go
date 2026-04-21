@@ -103,8 +103,9 @@ type CourseChange struct {
 
 // webhookEntry webhook 注册项（service 包定义供 JwService 使用）
 type webhookEntry struct {
-	URL    string
-	Secret string
+	URL       string
+	Secret    string
+	Registered time.Time
 }
 
 // NewJwService 创建服务实例
@@ -139,10 +140,18 @@ func (s *JwService) ForEachWebhook(fn func(url, secret string) bool) {
 func (s *JwService) RegisterWebhookURL(sessionID, url, secret string) {
 	s.webhookMu.Lock()
 	s.webhookStore[sessionID] = &webhookEntry{
-		URL:    url,
-		Secret: secret,
+		URL:       url,
+		Secret:    secret,
+		Registered: time.Now(),
 	}
 	s.webhookMu.Unlock()
+}
+
+// GetWebhookEntry 获取 webhook 注册条目
+func (s *JwService) GetWebhookEntry(sessionID string) *webhookEntry {
+	s.webhookMu.RLock()
+	defer s.webhookMu.RUnlock()
+	return s.webhookStore[sessionID]
 }
 
 // GetLatestScheduleDiff 获取最近一次课表变动

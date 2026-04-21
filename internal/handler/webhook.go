@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,33 +17,7 @@ import (
 	"jww/pkg/response"
 )
 
-// webhookEntry webhook 注册项
-type webhookEntry struct {
-	URL        string
-	Secret     string
-	SessionID  string
-	Registered time.Time
-}
-
-// webhookTriggerRecord 最近触发记录
-type webhookTriggerRecord struct {
-	Time    string `json:"time"`
-	URL     string `json:"url"`
-	Summary string `json:"summary"`
-	Success bool   `json:"success"`
-}
-
-// webhookStore 内存存储 webhook 注册
-var (
-	webhookStore     = make(map[string]*webhookEntry)
-	webhookMu        sync.RWMutex
-	triggerHistory   []webhookTriggerRecord
-	triggerHistoryMu sync.Mutex
-)
-
-const maxHistory = 5
-
-// RegisterWebhook 注册 Webhook
+// RegisterWebhook 注册 Webhook（写入 service 层的统一存储）
 func (h *ScheduleHandler) RegisterWebhook(c *gin.Context) {
 	sessionIDStr, ok := getSessionID(c)
 	if !ok {
@@ -61,14 +34,8 @@ func (h *ScheduleHandler) RegisterWebhook(c *gin.Context) {
 		return
 	}
 
-	webhookMu.Lock()
-	webhookStore[sessionIDStr] = &webhookEntry{
-		URL:        req.URL,
-		Secret:     req.Secret,
-		SessionID:  sessionIDStr,
-		Registered: time.Now(),
-	}
-	webhookMu.Unlock()
+	jwSvc := service.GetJwService()
+	jwSvc.RegisterWebhookURL(sessionIDStr, req.URL, req.Secret)
 
 	response.Success(c, gin.H{"message": "webhook 注册成功"})
 }
@@ -81,38 +48,22 @@ func (h *ScheduleHandler) TriggerWebhook(c *gin.Context) {
 		return
 	}
 
-	webhookMu.RLock()
-	entry, exists := webhookStore[sessionIDStr]
-	webhookMu.RUnlock()
-
-	if !exists {
-		response.Error(c, http.StatusBadRequest, "未注册 webhook")
-		return
-	}
-
 	jwSvc := service.GetJwService()
 	diff := jwSvc.GetLatestScheduleDiff(sessionIDStr)
 
 	summary := summarizeDiff(diff)
+	entry := jwSvc.GetWebhookEntry(sessionIDStr)
+	if entry == nil {
+		response.Error(c, http.StatusBadRequest, "未注册 webhook")
+		return
+	}
+
 	ok_ := sendWebhookPost(entry.URL, entry.Secret, diff)
 
-	// 记录
-	triggerHistoryMu.Lock()
-	triggerHistory = append(triggerHistory, webhookTriggerRecord{
-		Time:    time.Now().Format("2006-01-02 15:04"),
-		URL:     entry.URL,
-		Summary: summary,
-		Success: ok_,
-	})
-	if len(triggerHistory) > maxHistory {
-		triggerHistory = triggerHistory[len(triggerHistory)-maxHistory:]
-	}
-	triggerHistoryMu.Unlock()
-
 	if ok_ {
-		response.Success(c, gin.H{"message": "推送成功"})
+		response.Success(c, gin.H{"message": "推送成功", "summary": summary})
 	} else {
-		response.Error(c, http.StatusInternalServerError, "推送失败")
+		response.Error(c, http.StatusInternalServerError, "推送失败: "+summary)
 	}
 }
 
@@ -124,35 +75,24 @@ func (h *ScheduleHandler) GetWebhookInfo(c *gin.Context) {
 		return
 	}
 
-	webhookMu.RLock()
-	entry, exists := webhookStore[sessionIDStr]
-	webhookMu.RUnlock()
+	jwSvc := service.GetJwService()
+	entry := jwSvc.GetWebhookEntry(sessionIDStr)
 
-	triggerHistoryMu.Lock()
-	history := make([]webhookTriggerRecord, len(triggerHistory))
-	copy(history, triggerHistory)
-	triggerHistoryMu.Unlock()
-
-	if !exists {
-		response.Success(c, gin.H{
-			"registered": false,
-			"history":    history,
-		})
+	if entry == nil {
+		response.Success(c, gin.H{"registered": false})
 		return
 	}
 
-	// 隐藏 secret 前缀
 	showSecret := ""
 	if len(entry.Secret) > 8 {
 		showSecret = entry.Secret[:8] + "***"
 	}
 
 	response.Success(c, gin.H{
-		"registered": true,
-		"url":        entry.URL,
-		"secret":     showSecret,
-		"registeredAt": entry.Registered.Format("2006-01-02 15:04"),
-		"history":   history,
+		"registered":    true,
+		"url":           entry.URL,
+		"secret":        showSecret,
+		"registeredAt":  entry.Registered.Format("2006-01-02 15:04"),
 	})
 }
 
