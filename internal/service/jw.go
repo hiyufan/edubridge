@@ -272,19 +272,27 @@ func (s *JwService) Login(sessionID, username, password, captcha, loginType stri
 		return fmt.Errorf("%s", result.Info)
 	}
 
-	// 访问 gotourl 建立完整 session
+	// 访问 gotourl 建立完整 session（NB1 修复：resp.Body 必须关闭）
 	if result.Gotourl != "" {
 		req, err := http.NewRequest("GET", result.Gotourl, nil)
 		if err == nil {
-			if _, err := session.HttpClient.Do(req); err != nil {
+			resp, err := session.HttpClient.Do(req)
+			if err != nil {
 				slog.Warn("gotourl 跳转失败", "url", result.Gotourl, "err", err)
+			} else {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
 			}
 		}
 	} else {
 		req, err := http.NewRequest("GET", baseURL+"/studentportal.php/Main/", nil)
 		if err == nil {
-			if _, err := session.HttpClient.Do(req); err != nil {
+			resp, err := session.HttpClient.Do(req)
+			if err != nil {
 				slog.Warn("Main 页面访问失败", "err", err)
+			} else {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
 			}
 		}
 	}
@@ -739,7 +747,6 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 				}
 
 				mu.Lock()
-				defer mu.Unlock()
 				fetchedWeeks++
 				if semester == "" {
 					semester = parsed.Semester
@@ -753,6 +760,7 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 				if semesterStart == "" && parsed.SemesterStart != "" {
 					semesterStart = parsed.SemesterStart
 				}
+				mu.Unlock()
 
 				for _, c := range parsed.Courses {
 					key := fmt.Sprintf("%s|%s|%d|%d", c.Name, c.Teacher, c.DayOfWeek, c.PeriodStart)
@@ -816,9 +824,12 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 		return nil, err
 	}
 
-	// 尝试从缓存获取全部成绩
-	if semester == "" && session.ScoreCache != nil && time.Now().Before(session.ScoreCache.Expire) {
-		return session.ScoreCache.Data, nil
+	// 尝试从缓存获取全部成绩（NB3 修复：读 ScoreCache 需要 s.mu 保护）
+	s.mu.RLock()
+	cache := session.ScoreCache
+	s.mu.RUnlock()
+	if semester == "" && cache != nil && time.Now().Before(cache.Expire) {
+		return cache.Data, nil
 	}
 
 	// 解析学期参数：格式 "2024-2025-2" -> xn="2024-2025", xq="2"
@@ -842,11 +853,13 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 
 	slog.Info("成绩获取完成", "total_collected", len(allScores))
 
-	// 缓存全部未过滤的成绩（BUG-7 修复：在过滤前缓存）
+	// 缓存全部未过滤的成绩（BUG-7 修复：在过滤前缓存，NB3 修复：写 ScoreCache 需要 s.mu 保护）
+	s.mu.Lock()
 	session.ScoreCache = &ScoreCache{
 		Data:   allScores,
 		Expire: time.Now().Add(serviceScoreCacheTTL),
 	}
+	s.mu.Unlock()
 
 	// 客户端按学期过滤（xn+xq 组合精确匹配）
 	if semester != "" {

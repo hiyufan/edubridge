@@ -11,10 +11,12 @@ export const useUserStore = defineStore('user', () => {
     uid.value = data.uid
   }
 
-  function logout() {
+  async function logout() {
     token.value = ''
     uid.value = ''
-    // B12 修复：不再使用 localStorage 存储 sessionId，无需清理
+    // NB4 修复：request.sessionId 也应置空
+    const request = await import('../utils/request').then(m => m.default)
+    request.sessionId = ''
   }
 
   return { token, uid, setUser, logout }
