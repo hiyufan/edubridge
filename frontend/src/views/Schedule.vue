@@ -485,31 +485,44 @@ onMounted(async () => {
 /* Mobile: horizontal scroll, larger cells */
 @media (max-width: 640px) {
   .schedule-body {
-    grid-template-columns: 44px repeat(7, 120px);
-    grid-template-rows: 40px repeat(12, 80px);
+    grid-template-columns: 36px repeat(7, minmax(0, 1fr));
+    grid-template-rows: 32px repeat(12, 48px);
     overflow-x: auto;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
 
   .day-header-cell {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
   }
 
+  .period-num {
+    font-size: 11px;
+  }
+
   .course-card {
-    padding: 6px 8px;
-    border-radius: 8px;
+    padding: 3px 4px;
+    border-radius: 6px;
+    justify-content: flex-start;
+    gap: 1px;
   }
 
   .course-name {
-    font-size: 13px;
-    -webkit-line-clamp: 2;
+    font-size: 11px;
+    font-weight: 700;
+    -webkit-line-clamp: 3;
   }
 
   .course-room {
-    font-size: 11px;
+    font-size: 10px;
     -webkit-line-clamp: 1;
+  }
+
+  .note-indicator {
+    font-size: 9px;
+    top: 2px;
+    right: 3px;
   }
 }
 
