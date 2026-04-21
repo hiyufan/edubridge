@@ -40,11 +40,20 @@ const courseColors = [
   { bg: '#5AC8FA', light: 'rgba(90, 200, 250, 0.15)', text: '#5AC8FA' },
 ]
 
-const getCourseColor = (name) => {
-  if (!name) return courseColors[0]
-  const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
-  return courseColors[hash % courseColors.length]
-}
+// P6 修复：computed 缓存 name→color 映射，render 时不再重复 hash 计算
+const courseColorMap = computed(() => {
+  const m = new Map()
+  if (!scheduleStore.scheduleData?.courses) return m
+  for (const c of scheduleStore.scheduleData.courses) {
+    if (!m.has(c.name)) {
+      const hash = c.name.split('').reduce((a, ch) => a + ch.charCodeAt(0), 0)
+      m.set(c.name, courseColors[hash % courseColors.length])
+    }
+  }
+  return m
+})
+
+const getCourseColor = (name) => courseColorMap.value.get(name) || courseColors[0]
 
 const formatDate = () => {
   const now = new Date()

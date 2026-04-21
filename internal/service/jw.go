@@ -832,17 +832,8 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 		return cache.Data, nil
 	}
 
-	// 解析学期参数：格式 "2024-2025-2" -> xn="2024-2025", xq="2"
-	var xn, xq string
-	if semester != "" {
-		parts := strings.Split(semester, "-")
-		if len(parts) >= 2 {
-			xn = parts[0] + "-" + parts[1]
-			xq = parts[len(parts)-1]
-		}
-	}
-
-	slog.Info("GetScorePage 请求参数", "semester", semester, "xn", xn, "xq", xq)
+	// B8 修复：删除 xn/xq 死代码（原来声明后仅用于 slog，未参与过滤）
+	slog.Info("GetScorePage 请求参数", "semester", semester)
 
 	// 循环分页拿完全部成绩
 	// 教务系统忽略 rows 参数，硬编码每页最多 9 条，必须循环分页

@@ -34,7 +34,7 @@ func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 
 	jwSvc := service.GetJwService()
 
-	// 如果没有指定 week，先获取课表以提取学期起始日，计算真实当前周
+	// P1 修复：week == nil 时复用第一次 GetSchedulePage 的结果，不再二次请求
 	if week == nil {
 		// 先获取当前页面（可能是入口页或当前周的课表）来获取 semesterStart
 		html, err := jwSvc.GetSchedulePage(sessionIDStr, nil)
@@ -55,21 +55,23 @@ func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 			realCurrentWeek = service.CalcRealCurrentWeek(parsed.SemesterStart, 20)
 		}
 
-		// 用真实当前周再次获取课表
-		html, err = jwSvc.GetSchedulePage(sessionIDStr, &realCurrentWeek)
-		if err != nil {
-			response.Error(c, http.StatusInternalServerError, err.Error())
-			return
+		// 如果入口页直接是课表（EntryHtml），GetSchedulePage 已直接返回，无需二次请求
+		// 否则复用第一次拿到的 html，只在周数不同时才二次请求
+		if parsed.EntryHtml == "" && realCurrentWeek != parsed.DQZ {
+			html, err = jwSvc.GetSchedulePage(sessionIDStr, &realCurrentWeek)
+			if err != nil {
+				response.Error(c, http.StatusInternalServerError, err.Error())
+				return
+			}
+			parsed, err = jwSvc.ParseSchedule(html)
+			if err != nil {
+				response.Error(c, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 
-		schedule, err := jwSvc.ParseSchedule(html)
-		if err != nil {
-			response.Error(c, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		schedule.CurrentWeek = realCurrentWeek
-		response.Success(c, schedule)
+		parsed.CurrentWeek = realCurrentWeek
+		response.Success(c, parsed)
 		return
 	}
 

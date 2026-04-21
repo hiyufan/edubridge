@@ -10,30 +10,33 @@ const { scheduleData, loading } = storeToRefs(scheduleStore)
 const currentWeek = ref(1)
 const maxWeek = 20
 
+// P6 修复：课程颜色配置
+const courseColors = [
+  { bg: '#3b82f6', light: '#dbeafe' }, { bg: '#10b981', light: '#d1fae5' },
+  { bg: '#f59e0b', light: '#fef3c7' }, { bg: '#ef4444', light: '#fee2e2' },
+  { bg: '#8b5cf6', light: '#ede9fe' }, { bg: '#06b6d4', light: '#cffafe' },
+  { bg: '#f97316', light: '#ffedd5' }, { bg: '#84cc16', light: '#ecfccb' },
+]
+
+// P6 修复：computed 缓存 name→color 映射，render 时不再重复 hash 计算
+const courseColorMap = computed(() => {
+  const m = new Map()
+  if (!scheduleData.value?.courses) return m
+  for (const c of scheduleData.value.courses) {
+    if (!m.has(c.name)) {
+      const hash = c.name.split('').reduce((a, ch) => a + ch.charCodeAt(0), 0)
+      m.set(c.name, courseColors[hash % courseColors.length])
+    }
+  }
+  return m
+})
+
+const getCourseColor = (name) => courseColorMap.value.get(name) || courseColors[0]
+
 const weeks = computed(() => Array.from({ length: maxWeek }, (_, i) => i + 1))
 
 const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-
 const periods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-
-// 课程颜色配置 - Apple 风格
-const courseColors = [
-  { bg: '#007AFF', light: 'rgba(0, 122, 255, 0.15)' },
-  { bg: '#34C759', light: 'rgba(52, 199, 89, 0.15)' },
-  { bg: '#FF9500', light: 'rgba(255, 149, 0, 0.15)' },
-  { bg: '#AF52DE', light: 'rgba(175, 82, 222, 0.15)' },
-  { bg: '#FF2D55', light: 'rgba(255, 45, 85, 0.15)' },
-  { bg: '#5AC8FA', light: 'rgba(90, 200, 250, 0.15)' },
-  { bg: '#FF3B30', light: 'rgba(255, 59, 48, 0.15)' },
-  { bg: '#5856D6', light: 'rgba(88, 86, 214, 0.15)' }
-]
-
-// 根据课程名称获取固定颜色
-const getCourseColor = (name) => {
-  if (!name) return courseColors[0]
-  const hash = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
-  return courseColors[hash % courseColors.length]
-}
 
 // C7 修复：复用 schedule store，不再重复实现 fetchSchedule + AbortController
 const changeWeek = async (week) => {
