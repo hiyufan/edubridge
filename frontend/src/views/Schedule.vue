@@ -509,14 +509,17 @@ onMounted(async () => {
   }
 
   .course-name {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
-    -webkit-line-clamp: 3;
+    word-break: break-all;
+    text-align: center;
+    overflow: visible;
+    display: block;
   }
 
   .course-room {
     font-size: 10px;
-    -webkit-line-clamp: 1;
+    white-space: normal;
   }
 
   .note-indicator {
