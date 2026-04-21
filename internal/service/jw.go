@@ -20,6 +20,13 @@ import (
 	"jww/internal/model"
 )
 
+// C5 修复：魔法数字集中管理（service 层）
+const (
+	serviceSessionTTL       = 30 * time.Minute // 会话过期时间
+	serviceScoreCacheTTL    = 15 * time.Minute // 成绩缓存过期时间
+	serviceScheduleCacheTTL = 5  * time.Minute // 课表缓存过期时间
+)
+
 const baseURL = "https://jw.fzrjxy.com"
 
 var (
@@ -115,12 +122,23 @@ func (s *JwService) cleanup() {
 	}
 }
 
-// getSession 获取或创建会话
+// getSession 获取或创建会话（C8 优化：缩小锁粒度，读锁检查→写锁创建的双重检查模式）
 func (s *JwService) getSession(sessionID string) *Session {
+	// 第一次尝试：读锁检查（大多数情况 session 已存在且未过期）
+	s.mu.RLock()
+	session, exists := s.sessions[sessionID]
+	if exists && !time.Now().After(session.ExpireTime) {
+		s.mu.RUnlock()
+		return session
+	}
+	s.mu.RUnlock()
+
+	// 需要创建新 session，升级为写锁
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	session, exists := s.sessions[sessionID]
+	// 双重检查：持有写锁后再次确认（其他 goroutine 可能已创建）
+	session, exists = s.sessions[sessionID]
 	if !exists || time.Now().After(session.ExpireTime) {
 		cookieJar := &jar{}
 		client := resty.New()
@@ -146,7 +164,7 @@ func (s *JwService) getSession(sessionID string) *Session {
 			Client:     client,
 			HttpClient: httpClient,
 			CookieJar:  cookieJar,
-			ExpireTime: time.Now().Add(30 * time.Minute),
+			ExpireTime: time.Now().Add(serviceSessionTTL),
 		}
 		s.sessions[sessionID] = session
 	}
@@ -273,7 +291,7 @@ func (s *JwService) Login(sessionID, username, password, captcha, loginType stri
 
 	s.mu.Lock()
 	session.UID = username
-	session.ExpireTime = time.Now().Add(30 * time.Minute)
+	session.ExpireTime = time.Now().Add(serviceSessionTTL)
 	s.mu.Unlock()
 
 	return nil
@@ -779,7 +797,7 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 	s.mu.Lock()
 	s.scheduleCache[sessionID] = &ScheduleCache{
 		Data:   result,
-		Expire: time.Now().Add(5 * time.Minute),
+		Expire: time.Now().Add(serviceScheduleCacheTTL),
 	}
 	s.mu.Unlock()
 
@@ -827,7 +845,7 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 	// 缓存全部未过滤的成绩（BUG-7 修复：在过滤前缓存）
 	session.ScoreCache = &ScoreCache{
 		Data:   allScores,
-		Expire: time.Now().Add(15 * time.Minute),
+		Expire: time.Now().Add(serviceScoreCacheTTL),
 	}
 
 	// 客户端按学期过滤（xn+xq 组合精确匹配）
@@ -843,6 +861,22 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 	}
 
 	return allScores, nil
+}
+
+// buildScoreRequest 构造带有通用 Header 的 HTTP 请求（C2 优化：消除重复 Header 代码）
+func buildScoreRequest(method, url string, body io.Reader, contentType string) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json,text/html,*/*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+	req.Header.Set("Referer", baseURL+"/")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	return req, nil
 }
 
 // fetchAllScores 分页拉取全部成绩（独立函数确保每次 defer resp.Body.Close() 及时生效）
@@ -876,14 +910,10 @@ func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 
 		var resp *http.Response
 		if page == 1 {
-			req, err := http.NewRequest("GET", baseURL+"/studentportal.php/Jxxx/cjxxlb", nil)
+			req, err := buildScoreRequest("GET", baseURL+"/studentportal.php/Jxxx/cjxxlb", nil, "")
 			if err != nil {
 				return nil, fmt.Errorf("构建成绩请求失败: %v", err)
 			}
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-			req.Header.Set("Accept", "application/json,text/html,*/*")
-			req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
-			req.Header.Set("Referer", baseURL+"/")
 
 			q := req.URL.Query()
 			for k, v := range queryParams {
@@ -900,15 +930,10 @@ func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 			for k, v := range queryParams {
 				postData.Set(k, v)
 			}
-			postReq, err := http.NewRequest("POST", baseURL+"/studentportal.php/Jxxx/cjxxlb", strings.NewReader(postData.Encode()))
+			postReq, err := buildScoreRequest("POST", baseURL+"/studentportal.php/Jxxx/cjxxlb", strings.NewReader(postData.Encode()), "application/x-www-form-urlencoded")
 			if err != nil {
 				return nil, fmt.Errorf("构建成绩请求失败: %v", err)
 			}
-			postReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-			postReq.Header.Set("Accept", "application/json,text/html,*/*")
-			postReq.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
-			postReq.Header.Set("Referer", baseURL+"/")
-			postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 			resp, err = session.HttpClient.Do(postReq)
 			if err != nil {

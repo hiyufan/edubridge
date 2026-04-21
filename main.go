@@ -17,6 +17,77 @@ import (
 	"jww/internal/service"
 )
 
+// C5 修复：魔法数字集中管理
+const (
+	loginMaxAttempts   = 10
+	captchaMaxAttempts = 100
+	rateLimitWindow   = 5 * time.Minute
+	sessionTTL        = 30 * time.Minute
+	scoreCacheTTL     = 15 * time.Minute
+	cleanupInterval   = 10 * time.Minute
+	defaultMaxWeek    = 20
+)
+
+// C1 修复：限速中间件工厂函数，消除 loginLimiter 和 captchaLimiter 的重复代码
+func newRateLimiter(limit int) gin.HandlerFunc {
+	var mu sync.Mutex
+	attempts := make(map[string][]time.Time)
+
+	// C5 修复：后台 goroutine 定时清理，使用统一的 cleanupInterval
+	go func() {
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			mu.Lock()
+			window := time.Now().Add(-rateLimitWindow)
+			for ip, times := range attempts {
+				valid := make([]time.Time, 0)
+				for _, t := range times {
+					if t.After(window) {
+						valid = append(valid, t)
+					}
+				}
+				if len(valid) == 0 {
+					delete(attempts, ip)
+				} else {
+					attempts[ip] = valid
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+		now := time.Now()
+		window := now.Add(-rateLimitWindow)
+
+		mu.Lock()
+		var valid []time.Time
+		for _, t := range attempts[ip] {
+			if t.After(window) {
+				valid = append(valid, t)
+			}
+		}
+		if len(valid) == 0 {
+			delete(attempts, ip)
+		} else {
+			attempts[ip] = valid
+		}
+
+		if len(valid) >= limit {
+			mu.Unlock()
+			c.JSON(429, gin.H{"status": 0, "info": "请求过于频繁，请稍后再试"})
+			c.Abort()
+			return
+		}
+
+		attempts[ip] = append(valid, now)
+		mu.Unlock()
+		c.Next()
+	}
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -45,97 +116,9 @@ func main() {
 	scoreHandler := handler.NewScoreHandler()
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, cfg.JWTRefreshSecret)
 
-	// 限速中间件（并发安全实现）
-	var loginAttemptsMu sync.Mutex
-	loginAttempts := make(map[string][]time.Time)
-
-	// B9 修复：启动后台 goroutine，每 10 分钟清理一次 loginAttempts map，防止无限增长
-	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			loginAttemptsMu.Lock()
-			for ip, times := range loginAttempts {
-				window := time.Now().Add(-5 * time.Minute)
-				valid := make([]time.Time, 0)
-				for _, t := range times {
-					if t.After(window) {
-						valid = append(valid, t)
-					}
-				}
-				if len(valid) == 0 {
-					delete(loginAttempts, ip)
-				} else {
-					loginAttempts[ip] = valid
-				}
-			}
-			loginAttemptsMu.Unlock()
-		}
-	}()
-
-	loginLimiter := func(c *gin.Context) {
-		ip := c.ClientIP()
-		now := time.Now()
-		window := now.Add(-5 * time.Minute)
-
-		loginAttemptsMu.Lock()
-		var valid []time.Time
-		for _, t := range loginAttempts[ip] {
-			if t.After(window) {
-				valid = append(valid, t)
-			}
-		}
-		// BUG-8 修复：过滤后无记录则删除该 IP，防止内存无限增长
-		if len(valid) == 0 {
-			delete(loginAttempts, ip)
-		} else {
-			loginAttempts[ip] = valid
-		}
-
-		if len(valid) >= 10 {
-			loginAttemptsMu.Unlock()
-			c.JSON(429, gin.H{"status": 0, "info": "登录尝试次数过多，请稍后再试"})
-			c.Abort()
-			return
-		}
-
-		loginAttempts[ip] = append(valid, now)
-		loginAttemptsMu.Unlock()
-		c.Next()
-	}
-
-	var captchaAttemptsMu sync.Mutex
-	captchaAttempts := make(map[string][]time.Time)
-	captchaLimiter := func(c *gin.Context) {
-		ip := c.ClientIP()
-		now := time.Now()
-		window := now.Add(-5 * time.Minute)
-
-		captchaAttemptsMu.Lock()
-		var valid []time.Time
-		for _, t := range captchaAttempts[ip] {
-			if t.After(window) {
-				valid = append(valid, t)
-			}
-		}
-		// 同样修复：过滤后无记录则删除
-		if len(valid) == 0 {
-			delete(captchaAttempts, ip)
-		} else {
-			captchaAttempts[ip] = valid
-		}
-
-		if len(valid) >= 100 {
-			captchaAttemptsMu.Unlock()
-			c.JSON(429, gin.H{"status": 0, "info": "请求过于频繁，请稍后再试"})
-			c.Abort()
-			return
-		}
-
-		captchaAttempts[ip] = append(valid, now)
-		captchaAttemptsMu.Unlock()
-		c.Next()
-	}
+	// 限速中间件：C1 修复，改用工厂函数
+	loginLimiter   := newRateLimiter(loginMaxAttempts)
+	captchaLimiter := newRateLimiter(captchaMaxAttempts)
 
 	// 路由
 	api := r.Group("/api")

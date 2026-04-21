@@ -16,14 +16,14 @@ type Response struct {
 }
 
 func Success(c *gin.Context, data interface{}) {
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"status": 1,
 		"data":   data,
 	})
 }
 
 func SuccessWithToken(c *gin.Context, token string, uid string, expiresIn int) {
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"status":    1,
 		"info":      "登录成功",
 		"token":     token,
@@ -33,7 +33,7 @@ func SuccessWithToken(c *gin.Context, token string, uid string, expiresIn int) {
 }
 
 func SuccessWithInfo(c *gin.Context, info string) {
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"status": 1,
 		"info":   info,
 	})

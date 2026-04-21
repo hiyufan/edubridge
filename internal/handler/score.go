@@ -34,16 +34,6 @@ func (h *ScoreHandler) GetScore(c *gin.Context) {
 		return
 	}
 
-	slog.Info("GetScore handler 返回", "count", len(scores))
-
-	// 按学期统计
-	semMap := make(map[string]int)
-	for _, s := range scores {
-		key := s.Year + "-" + s.Semester
-		semMap[key]++
-	}
-	slog.Info("各学期成绩数", "detail", semMap)
-
 	response.Success(c, scores)
 }
 
