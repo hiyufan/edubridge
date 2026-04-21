@@ -53,6 +53,9 @@ const attemptSilentRefresh = async () => {
 // 导出静默刷新方法，供 main.js 在初始化时调用
 export { attemptSilentRefresh }
 
+// 清理 sessionId，供 logout 等场景调用
+export const clearSessionId = () => { request.sessionId = '' }
+
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {

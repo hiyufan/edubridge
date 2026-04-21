@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { clearSessionId } from '../utils/request'
 
 export const useUserStore = defineStore('user', () => {
   // VUE-1 修复：Token 仅存 Pinia 内存，不写入 localStorage，防止 XSS 攻击
@@ -11,12 +12,10 @@ export const useUserStore = defineStore('user', () => {
     uid.value = data.uid
   }
 
-  async function logout() {
+  function logout() {
     token.value = ''
     uid.value = ''
-    // NB4 修复：request.sessionId 也应置空
-    const request = await import('../utils/request').then(m => m.default)
-    request.sessionId = ''
+    clearSessionId()
   }
 
   return { token, uid, setUser, logout }

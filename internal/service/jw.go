@@ -322,7 +322,7 @@ func (s *JwService) GetSchedulePage(sessionID string, week *int) (string, error)
 	if err != nil {
 		return "", err
 	}
-	_ = doc // EntryHtml 非空时 params.EntryHtml 已含 HTML，无需额外处理
+	_ = doc // doc 仅 GetFullSchedule 路径使用，GetSchedulePage 只需 params
 
 	// 如果入口页直接是课表
 	if params.EntryHtml != "" {
