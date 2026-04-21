@@ -301,6 +301,121 @@ Authorization: Bearer <access-token>
 
 ---
 
+### GET /api/schedule/conflicts
+
+检测课程时间冲突（同一时段多门课程）。
+
+**响应**:
+```json
+{
+  "status": 1,
+  "data": [
+    {
+      "dayOfWeek": 1,
+      "periodStart": 1,
+      "courses": [
+        { "name": "高等数学", "room": "A101", "teacher": "张三" },
+        { "name": "大学物理", "room": "B201", "teacher": "李四" }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/schedule/ical
+
+生成 iCalendar 格式日历订阅地址。
+
+**响应**: `text/calendar; charset=utf-8`
+
+返回标准 iCalendar 格式，可导入 Google Calendar / Apple Calendar / Outlook。
+
+---
+
+### GET /api/webhook
+
+查询当前用户注册的所有 Webhook。
+
+**响应**:
+```json
+{
+  "status": 1,
+  "data": [
+    {
+      "id": "wh_xxx",
+      "url": "https://example.com/webhook",
+      "events": ["score", "schedule"],
+      "createdAt": "2026-04-21T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/webhook
+
+注册一个新的 Webhook 回调。
+
+**请求体**:
+```json
+{
+  "url": "https://example.com/webhook",
+  "events": ["score", "schedule"],
+  "secret": "可选签名密钥"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `url` | string | ✅ | 回调地址 |
+| `events` | string[] | ✅ | 事件类型: `score`(成绩变动) / `schedule`(课表变动) |
+| `secret` | string | ❌ | HMAC 签名密钥 |
+
+**响应**:
+```json
+{
+  "status": 1,
+  "info": "Webhook 注册成功",
+  "data": { "id": "wh_xxx" }
+}
+```
+
+---
+
+### DELETE /api/webhook/:id
+
+删除指定的 Webhook。
+
+**响应**:
+```json
+{
+  "status": 1,
+  "info": "Webhook 已删除"
+}
+```
+
+---
+
+### GET /api/webhook/info
+
+获取当前 Webhook 的签名密钥（仅首次调用时返回密钥内容）。
+
+**响应**:
+```json
+{
+  "status": 1,
+  "data": {
+    "secret": "whs_xxx",
+    "created": true
+  }
+}
+```
+
+---
+
 ## 通用响应格式
 
 ```json

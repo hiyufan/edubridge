@@ -1,6 +1,6 @@
 # jww.p — 教务系统中间件
 
-为高校教务系统打造的 Go 后端 + Vue 前端中间件，提供登录认证、课表查询、成绩查询等服务。开箱即用，部署简单。
+为高校教务系统打造的 Go 后端 + Vue 前端中间件，提供登录认证、课表查询、成绩查询、GPA 趋势分析、课程冲突检测、iCal 订阅、Webhook 通知等服务。开箱即用，部署简单。
 
 > ⚠️ 本项目仅供学习与个人研究使用，请勿用于任何商业活动或大规模自动化操作。
 
@@ -8,9 +8,13 @@
 
 - 🔐 **安全登录** — 验证码 + JWT 双 Token 认证，支持 Token 自动刷新
 - 📅 **课表查询** — 按周切换，自动识别当前周，支持全学期课表
+- ⚠️ **冲突检测** — 自动检测同一时段重复安排的课程
 - 📊 **成绩查询** — 按学期筛选，显示学分、绩点等详细数据
+- 📈 **GPA 趋势图** — 原生 Canvas 绘制，贝塞尔曲线+渐变填充+数据点发光效果
 - 🧭 **今日课表** — 首页快速查看当天课程
 - 📱 **响应式设计** — 支持手机和桌面端
+- 🗓️ **iCal 订阅** — 生成标准 iCalendar 格式，可导入 Google Calendar/Apple Calendar/Outlook
+- 🔔 **Webhook 通知** — 成绩/课表变动时自动推送到指定 URL
 
 ## 技术栈
 
@@ -120,8 +124,15 @@ jww.p/
 | `/api/auth/me` | GET | 获取当前用户信息 |
 | `/api/schedule` | GET | 单周课表（参数: `week`） |
 | `/api/schedule/full` | GET | 全学期课表（参数: `maxWeek`） |
+| `/api/schedule/conflicts` | GET | 课程冲突检测 |
+| `/api/schedule/ical` | GET | iCal 日历订阅 |
 | `/api/score` | GET | 成绩（参数: `semester`） |
+| `/api/score/stats` | GET | 成绩统计（GPA、学分、挂科等） |
 | `/api/score/semesters` | GET | 可选学期列表 |
+| `/api/webhook` | GET | 查询已注册的 Webhook |
+| `/api/webhook` | POST | 注册 Webhook 回调 URL |
+| `/api/webhook/{id}` | DELETE | 删除指定 Webhook |
+| `/api/webhook/info` | GET | 获取 Webhook 签名密钥（仅首次） |
 
 ### 登录请求示例
 

@@ -7,10 +7,10 @@
 除公开接口外，所有业务接口均需在请求头携带 JWT Token：
 
 ```
-Authorization: Bearer <token>
+Authorization: Bearer ***
 ```
 
-Token 通过登录接口获取，有效期 24 小时，过期后需重新登录。
+Token 通过登录接口获取，有效期 2 小时，过期后需重新登录或使用 Refresh Token 续期。
 
 ---
 
@@ -57,8 +57,9 @@ Content-Type: application/json
 {
   "status": 1,
   "info": "登录成功",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "uid": "2405030544"
+  "token": "eyJhbG...9...",
+  "uid": "2405030544",
+  "expiresIn": 7200
 }
 ```
 
@@ -84,7 +85,7 @@ POST /api/auth/refresh
 
 ## 受保护接口
 
-以下接口需要在请求头携带 `Authorization: Bearer <token>`。
+以下接口需要在请求头携带 `Authorization: Bearer ***`。
 
 ---
 
@@ -255,6 +256,156 @@ GET /api/score/semesters
 {
   "status": 1,
   "data": ["2025-2026-2", "2025-2026-1", "2024-2025-2", "2024-2025-1"]
+}
+```
+
+---
+
+### 获取成绩统计
+
+```
+GET /api/score/stats
+```
+
+**响应：**
+```json
+{
+  "status": 1,
+  "data": {
+    "totalCredits": 80.5,
+    "weightedGPA": 3.45,
+    "failedCount": 1,
+    "semesterStats": [
+      { "semester": "2025-2026-2", "gpa": 3.67, "credits": 22.0 },
+      { "semester": "2025-2026-1", "gpa": 3.21, "credits": 24.5 }
+    ]
+  }
+}
+```
+
+---
+
+### 获取课程冲突列表
+
+```
+GET /api/schedule/conflicts
+```
+
+**响应：**
+```json
+{
+  "status": 1,
+  "data": [
+    {
+      "dayOfWeek": 1,
+      "periodStart": 1,
+      "courses": [
+        { "name": "高等数学", "room": "A101", "teacher": "张三" },
+        { "name": "大学物理", "room": "B201", "teacher": "李四" }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### 获取 iCal 日历订阅
+
+```
+GET /api/schedule/ical
+```
+
+**响应：**
+```
+text/calendar; charset=utf-8
+```
+
+返回标准 iCalendar 格式，可直接导入日历应用。
+
+---
+
+### 查询 Webhook
+
+```
+GET /api/webhook
+```
+
+**响应：**
+```json
+{
+  "status": 1,
+  "data": [
+    {
+      "id": "wh_xxx",
+      "url": "https://example.com/webhook",
+      "events": ["score", "schedule"],
+      "createdAt": "2026-04-21T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 注册 Webhook
+
+```
+POST /api/webhook
+Content-Type: application/json
+```
+
+**请求体：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `url` | string | ✅ | 回调地址 |
+| `events` | string[] | ✅ | 订阅事件类型: `score`(成绩变动)、`schedule`(课表变动) |
+| `secret` | string | ❌ | 签名密钥（用于 HMAC 验签） |
+
+**响应：**
+```json
+{
+  "status": 1,
+  "info": "Webhook 注册成功",
+  "data": { "id": "wh_xxx" }
+}
+```
+
+---
+
+### 删除 Webhook
+
+```
+DELETE /api/webhook/{id}
+```
+
+**响应：**
+```json
+{
+  "status": 1,
+  "info": "Webhook 已删除"
+}
+```
+
+---
+
+### 获取 Webhook 签名密钥（仅首次）
+
+```
+GET /api/webhook/info
+```
+
+首次调用返回签名密钥，用于 HMAC 验签。后续调用返回已存在的密钥信息。
+
+**响应：**
+```json
+{
+  "status": 1,
+  "data": {
+    "secret": "whs_xxx",
+    "created": true
+  }
 }
 ```
 

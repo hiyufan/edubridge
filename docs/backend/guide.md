@@ -17,8 +17,9 @@ internal/
 ├── handler/          # HTTP 接口处理层
 │   ├── auth.go       # 登录、Token 刷新、登出
 │   ├── captcha.go    # 验证码获取
-│   ├── schedule.go   # 课表
-│   └── score.go      # 成绩
+│   ├── schedule.go   # 课表（含冲突检测、iCal 生成）
+│   ├── score.go      # 成绩及统计
+│   └── webhook.go    # Webhook 注册、查询、删除
 ├── middleware/
 │   └── auth.go       # JWT 鉴权中间件
 ├── model/
