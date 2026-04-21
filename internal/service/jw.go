@@ -318,10 +318,11 @@ func (s *JwService) GetSchedulePage(sessionID string, week *int) (string, error)
 		return "", err
 	}
 
-	params, err := s.fetchScheduleParams(session)
+	doc, params, err := s.fetchScheduleParams(session)
 	if err != nil {
 		return "", err
 	}
+	_ = doc // EntryHtml 非空时 params.EntryHtml 已含 HTML，无需额外处理
 
 	// 如果入口页直接是课表
 	if params.EntryHtml != "" {
@@ -356,11 +357,11 @@ type ScheduleParams struct {
 	EntryHtml string
 }
 
-// fetchScheduleParams 获取课表参数
-func (s *JwService) fetchScheduleParams(session *Session) (*ScheduleParams, error) {
+// fetchScheduleParams 获取课表参数（可选返回已解析的 goquery.Document）
+func (s *JwService) fetchScheduleParams(session *Session) (*goquery.Document, *ScheduleParams, error) {
 	resp, err := session.Client.R().Get("/studentportal.php/Jxxx/xskbxx/optype/1")
 	if err != nil {
-		return nil, fmt.Errorf("获取课表入口失败: %v", err)
+		return nil, nil, fmt.Errorf("获取课表入口失败: %v", err)
 	}
 
 	html := resp.String()
@@ -369,7 +370,7 @@ func (s *JwService) fetchScheduleParams(session *Session) (*ScheduleParams, erro
 	if strings.Contains(html, "课程表") {
 		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 		if err != nil {
-			return nil, fmt.Errorf("HTML 解析失败: %w", err)
+			return nil, nil, fmt.Errorf("HTML 解析失败: %w", err)
 		}
 		title := doc.Find(".f2.b").Text()
 
@@ -384,7 +385,7 @@ func (s *JwService) fetchScheduleParams(session *Session) (*ScheduleParams, erro
 				xq, _ = strconv.Atoi(semMatch[2])
 			}
 
-			return &ScheduleParams{
+			return doc, &ScheduleParams{
 				XN:        xn,
 				XQ:        xq,
 				DQZ:       toInt(matches[3]),
@@ -396,15 +397,15 @@ func (s *JwService) fetchScheduleParams(session *Session) (*ScheduleParams, erro
 
 	// 尝试从 URL 提取参数
 	if params := extractParamsFromURL(resp.Request.URL); params != nil {
-		return params, nil
+		return nil, params, nil
 	}
 
 	// 尝试从 HTML 中的链接提取（使用闭包捕获结果）
-	var foundParams *ScheduleParams
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
-		return nil, fmt.Errorf("HTML 解析失败: %w", err)
+		return nil, nil, fmt.Errorf("HTML 解析失败: %w", err)
 	}
+	var foundParams *ScheduleParams
 	doc.Find("a[href], iframe[src]").EachWithBreak(func(i int, sel *goquery.Selection) bool {
 		href, _ := sel.Attr("href")
 		if href == "" {
@@ -417,18 +418,18 @@ func (s *JwService) fetchScheduleParams(session *Session) (*ScheduleParams, erro
 		return true
 	})
 	if foundParams != nil {
-		return foundParams, nil
+		return doc, foundParams, nil
 	}
 
 	// 从 JS 代码中提取
 	for _, match := range reJSURL.FindAllString(html, -1) {
 		cleaned := strings.Trim(match, `"'`)
 		if params := extractParamsFromURL(cleaned); params != nil {
-			return params, nil
+			return nil, params, nil
 		}
 	}
 
-	return nil, fmt.Errorf("无法获取课表参数")
+	return nil, nil, fmt.Errorf("无法获取课表参数")
 }
 
 func extractParamsFromURL(urlStr string) *ScheduleParams {
@@ -467,7 +468,11 @@ func (s *JwService) ParseSchedule(html string) (*model.Schedule, error) {
 	if err != nil {
 		return nil, fmt.Errorf("解析课表失败: %v", err)
 	}
+	return s.parseScheduleDoc(doc)
+}
 
+// parseScheduleDoc 从已解析的 goquery.Document 提取课表数据（P5 修复：避免重复解析同一 HTML）
+func (s *JwService) parseScheduleDoc(doc *goquery.Document) (*model.Schedule, error) {
 	title := doc.Find(".f2.b").Text()
 
 	// 解析标题
@@ -658,7 +663,7 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 		return nil, err
 	}
 
-	params, err := s.fetchScheduleParams(session)
+	doc, params, err := s.fetchScheduleParams(session)
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +672,7 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 
 	// 入口页直接是课表时，只返回当前周
 	if params.EntryHtml != "" {
-		parsed, _ := s.ParseSchedule(params.EntryHtml)
+		parsed, _ := s.parseScheduleDoc(doc)
 		weeks := make([]int, 1)
 		weeks[0] = params.DQZ
 
@@ -702,7 +707,11 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 		semesterStart := ""
 
 		var wg sync.WaitGroup
-		sem := make(chan struct{}, 3) // 并发控制
+		concurrency := maxWeek/3 + 1
+		if concurrency > 5 {
+			concurrency = 5
+		}
+		sem := make(chan struct{}, concurrency) // 并发控制
 
 		for start := 1; start <= maxWeek; start++ {
 			wg.Add(1)
@@ -817,7 +826,37 @@ type courseWithWeeks struct {
 	weeks  []int
 }
 
-// GetScorePage 获取成绩
+// GetCachedSemesters 从成绩缓存中提取学期列表（P4 修复）
+func (s *JwService) GetCachedSemesters(sessionID string) ([]string, error) {
+	s.mu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("session 不存在")
+	}
+
+	s.mu.RLock()
+	cache := session.ScoreCache
+	s.mu.RUnlock()
+	if cache == nil || time.Now().After(cache.Expire) {
+		return nil, fmt.Errorf("缓存不存在或已过期")
+	}
+
+	semesterSet := make(map[string]struct{})
+	for _, sc := range cache.Data {
+		semester := sc.Year + "-" + sc.Semester
+		semesterSet[semester] = struct{}{}
+	}
+
+	semesters := make([]string, 0, len(semesterSet))
+	for k := range semesterSet {
+		semesters = append(semesters, k)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(semesters)))
+	return semesters, nil
+}
+
+// GetScorePage 获取成绩（支持按学期过滤）
 func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, error) {
 	session, err := s.checkSession(sessionID)
 	if err != nil {
@@ -883,130 +922,158 @@ func buildScoreRequest(method, url string, body io.Reader, contentType string) (
 	return req, nil
 }
 
-// fetchAllScores 分页拉取全部成绩（独立函数确保每次 defer resp.Body.Close() 及时生效）
+// fetchAllScores 分页并发拉取全部成绩
 func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
-	allScores := []model.Score{}
-	page := 1
+	seen := sync.Map{}
+
+	// 第一页：获取总数
 	pageSize := 9
-	totalRows := 0
-	seen := make(map[string]struct{})
+	ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	queryParams := map[string]string{
+		"page":  "1", "rows": strconv.Itoa(pageSize), "start": "0",
+		"p":     "1", "pn":    "1", "_": ts,
+	}
+	req, err := buildScoreRequest("GET", baseURL+"/studentportal.php/Jxxx/cjxxlb", nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("构建成绩请求失败: %v", err)
+	}
+	q := req.URL.Query()
+	for k, v := range queryParams { q.Add(k, v) }
+	req.URL.RawQuery = q.Encode()
 
-	for {
-		if totalRows > 0 && len(allScores) >= totalRows {
-			slog.Info("成绩分页完成（已达到总数）", "total", totalRows, "collected", len(allScores))
-			break
-		}
-
-		if page > 50 {
-			slog.Warn("成绩分页达到上限", "page", page)
-			break
-		}
-
-		start := (page - 1) * pageSize
-		queryParams := map[string]string{
-			"page":  strconv.Itoa(page),
-			"rows":  strconv.Itoa(pageSize),
-			"start": strconv.Itoa(start),
-			"p":     strconv.Itoa(page),
-			"pn":    strconv.Itoa(page),
-			"_":     strconv.FormatInt(time.Now().UnixMilli(), 10),
-		}
-
-		var resp *http.Response
-		if page == 1 {
-			req, err := buildScoreRequest("GET", baseURL+"/studentportal.php/Jxxx/cjxxlb", nil, "")
-			if err != nil {
-				return nil, fmt.Errorf("构建成绩请求失败: %v", err)
-			}
-
-			q := req.URL.Query()
-			for k, v := range queryParams {
-				q.Add(k, v)
-			}
-			req.URL.RawQuery = q.Encode()
-
-			resp, err = session.HttpClient.Do(req)
-			if err != nil {
-				return nil, fmt.Errorf("获取成绩失败: %v", err)
-			}
-		} else {
-			postData := url.Values{}
-			for k, v := range queryParams {
-				postData.Set(k, v)
-			}
-			postReq, err := buildScoreRequest("POST", baseURL+"/studentportal.php/Jxxx/cjxxlb", strings.NewReader(postData.Encode()), "application/x-www-form-urlencoded")
-			if err != nil {
-				return nil, fmt.Errorf("构建成绩请求失败: %v", err)
-			}
-
-			resp, err = session.HttpClient.Do(postReq)
-			if err != nil {
-				return nil, fmt.Errorf("获取成绩失败: %v", err)
-			}
-		}
-
-		bodyBytes, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("读取成绩响应失败: %v", err)
-		}
-
-		bodyStr := string(bodyBytes)
-		slog.Info("成绩分页响应原始", "page", page, "body_len", len(bodyBytes), "status", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"), "body_preview", bodyStr[:min(100, len(bodyStr))])
-
-		var scoreResp scorePageResp
-		if err := json.Unmarshal(bodyBytes, &scoreResp); err != nil {
-			return nil, fmt.Errorf("解析成绩失败: %v", err)
-		}
-
-		if page == 1 && scoreResp.Total != "" {
-			totalRows, _ = strconv.Atoi(scoreResp.Total)
-			slog.Info("成绩总数", "total", totalRows)
-		}
-
-		slog.Info("成绩分页响应", "page", page, "rows_parsed", len(scoreResp.Rows), "total_known", totalRows)
-
-		if len(scoreResp.Rows) == 0 {
-			slog.Info("成绩分页结束（无数据）", "page", page)
-			break
-		}
-
-		newCount := 0
-		for _, r := range scoreResp.Rows {
-			key := r.Xn + r.Xq + r.Kcmc
-			if _, exists := seen[key]; !exists {
-				seen[key] = struct{}{}
-				newCount++
-
-				credit, _ := strconv.ParseFloat(r.Kcxf, 64)
-				gpa, _ := strconv.ParseFloat(r.Cjjd, 64)
-
-				allScores = append(allScores, model.Score{
-					Year:     r.Xn,
-					Semester: r.Xq,
-					ClassName: r.Ssbjmc,
-					Course:   r.Kcmc,
-					Nature:   r.Kcxz,
-					Credit:   credit,
-					Teacher:  r.Zdjsxm,
-					Grade:    r.Cj,
-					GPA:      gpa,
-					Type:     r.Cjsx,
-				})
-			}
-		}
-
-		slog.Info("成绩分页增量", "page", page, "new_count", newCount, "total_collected", len(allScores))
-
-		if newCount == 0 {
-			slog.Warn("成绩分页停止（无新数据，可能分页不工作）", "page", page)
-			break
-		}
-
-		page++
+	resp, err := session.HttpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("获取成绩失败: %v", err)
+	}
+	bodyBytes, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("读取成绩响应失败: %v", err)
 	}
 
+	var firstResp scorePageResp
+	if err := json.Unmarshal(bodyBytes, &firstResp); err != nil {
+		return nil, fmt.Errorf("解析成绩失败: %v", err)
+	}
+
+	totalRows := 0
+	if firstResp.Total != "" {
+		totalRows, _ = strconv.Atoi(firstResp.Total)
+	}
+	// totalRows 为 0 或 total 为空字符串（教务系统无成绩）时，直接解析第一页后返回
+	if totalRows <= 0 {
+		return parseScoreRows(firstResp.Rows, &seen), nil
+	}
+	totalPages := (totalRows + pageSize - 1) / pageSize
+
+	// 后续页并发抓取
+	concurrency := 5
+	if concurrency > totalPages-1 {
+		concurrency = totalPages - 1
+	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	results := make([]scorePageResp, totalPages)
+	failed := make([]bool, totalPages) // 标记哪些页失败
+
+	// 第一页结果先放入
+	results[0] = firstResp
+
+	for page := 2; page <= totalPages; page++ {
+		wg.Add(1)
+		go func(p int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			start := (p - 1) * pageSize
+			ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
+			postData := url.Values{
+				"page":  {strconv.Itoa(p)},
+				"rows":  {strconv.Itoa(pageSize)},
+				"start": {strconv.Itoa(start)},
+				"p":     {strconv.Itoa(p)},
+				"pn":    {strconv.Itoa(p)},
+				"_":     {ts},
+			}
+			postReq, err := buildScoreRequest("POST", baseURL+"/studentportal.php/Jxxx/cjxxlb",
+				strings.NewReader(postData.Encode()), "application/x-www-form-urlencoded")
+			if err != nil {
+				mu.Lock()
+				failed[p-1] = true
+				slog.Warn("构建成绩请求失败", "page", p, "err", err)
+				mu.Unlock()
+				return
+			}
+			postResp, err := session.HttpClient.Do(postReq)
+			if err != nil {
+				mu.Lock()
+				failed[p-1] = true
+				slog.Warn("获取成绩请求失败", "page", p, "err", err)
+				mu.Unlock()
+				return
+			}
+			pb, err := io.ReadAll(postResp.Body)
+			postResp.Body.Close()
+			if err != nil {
+				mu.Lock()
+				failed[p-1] = true
+				slog.Warn("读取成绩响应失败", "page", p, "err", err)
+				mu.Unlock()
+				return
+			}
+			var pr scorePageResp
+			if err := json.Unmarshal(pb, &pr); err != nil {
+				mu.Lock()
+				failed[p-1] = true
+				slog.Warn("解析成绩响应失败", "page", p, "err", err)
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			results[p-1] = pr
+			mu.Unlock()
+		}(page)
+	}
+	wg.Wait()
+
+	// 合并所有页（跳过失败页）
+	var allScores []model.Score
+	for i, resp := range results {
+		if failed[i] {
+			continue
+		}
+		allScores = append(allScores, parseScoreRows(resp.Rows, &seen)...)
+	}
+	if len(allScores) < totalRows {
+		slog.Warn("成绩分页不完整，部分页抓取失败", "collected", len(allScores), "expected", totalRows)
+	}
 	return allScores, nil
+}
+
+func parseScoreRows(rows []struct {
+	Xn string `json:"xn"`; Xq string `json:"xq"`; Ssbjmc string `json:"ssbjmc"`
+	Kcmc string `json:"kcmc"`; Kcxz string `json:"kcxz"`; Kcxf string `json:"kcfxf"`
+	Zdjsxm string `json:"zdjsxm"`; Cj any `json:"cj"`; Cjjd string `json:"cjjd"`
+	Cjsx string `json:"cjsx"`
+}, seen *sync.Map) []model.Score {
+	var out []model.Score
+	for _, r := range rows {
+		key := r.Xn + r.Xq + r.Kcmc
+		if _, exists := seen.Load(key); !exists {
+			seen.Store(key, struct{}{})
+			credit, _ := strconv.ParseFloat(r.Kcxf, 64)
+			gpa, _ := strconv.ParseFloat(r.Cjjd, 64)
+			out = append(out, model.Score{
+				Year: r.Xn, Semester: r.Xq, ClassName: r.Ssbjmc,
+				Course: r.Kcmc, Nature: r.Kcxz, Credit: credit,
+				Teacher: r.Zdjsxm, Grade: fmt.Sprintf("%v", r.Cj),
+				GPA: gpa, Type: r.Cjsx,
+			})
+		}
+	}
+	return out
 }
 
 type scorePageResp struct {
