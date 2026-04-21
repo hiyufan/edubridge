@@ -17,7 +17,7 @@ const router = createRouter({
       children: [
         {
           path: '',
-          redirect: '/schedule'
+          redirect: '/today'
         },
         {
           path: 'schedule',
