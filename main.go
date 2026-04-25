@@ -11,29 +11,29 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"jww/config"
 	"jww/internal/handler"
 	"jww/internal/middleware"
+	"jww/internal/model"
 	"jww/internal/service"
+	"jww/pkg/database"
 )
 
-// C5 修复：魔法数字集中管理
 const (
 	loginMaxAttempts   = 10
 	captchaMaxAttempts = 100
-	rateLimitWindow   = 5 * time.Minute
-	sessionTTL        = 30 * time.Minute
-	scoreCacheTTL     = 15 * time.Minute
-	cleanupInterval   = 10 * time.Minute
-	defaultMaxWeek    = 20
+	rateLimitWindow    = 5 * time.Minute
+	sessionTTL         = 30 * time.Minute
+	scoreCacheTTL      = 15 * time.Minute
+	cleanupInterval    = 10 * time.Minute
+	defaultMaxWeek     = 20
 )
 
-// C1 修复：限速中间件工厂函数，消除 loginLimiter 和 captchaLimiter 的重复代码
 func newRateLimiter(limit int) gin.HandlerFunc {
 	var mu sync.Mutex
 	attempts := make(map[string][]time.Time)
 
-	// C5 修复：后台 goroutine 定时清理，使用统一的 cleanupInterval
 	go func() {
 		ticker := time.NewTicker(cleanupInterval)
 		defer ticker.Stop()
@@ -89,12 +89,25 @@ func newRateLimiter(limit int) gin.HandlerFunc {
 }
 
 func main() {
+	godotenv.Load()
+
 	cfg := config.Load()
+
+	if err := database.InitMySQL(cfg.MySQL); err != nil {
+		log.Fatalf("Failed to initialize MySQL: %v", err)
+	}
+
+	if err := model.AutoMigrateRefreshToken(database.GetDB()); err != nil {
+		log.Fatalf("Failed to migrate RefreshToken model: %v", err)
+	}
+
+	if err := database.InitRedis(cfg.Redis); err != nil {
+		log.Fatalf("Failed to initialize Redis: %v", err)
+	}
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	// CORS（SEC-3 修复：从配置读取 AllowedOrigin）
 	r.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", cfg.AllowedOrigin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -109,7 +122,6 @@ func main() {
 		c.Next()
 	})
 
-	// 初始化处理器
 	authHandler := handler.NewAuthHandler(cfg.JWTSecret, cfg.JWTRefreshSecret, cfg.SecureCookie)
 	captchaHandler := handler.NewCaptchaHandler()
 	scheduleHandler := handler.NewScheduleHandler()
@@ -117,47 +129,37 @@ func main() {
 	notifyHandler := handler.NewNotifyHandler()
 	authMiddleware := middleware.NewAuthMiddleware(cfg.JWTSecret, cfg.JWTRefreshSecret)
 
-	// 限速中间件：C1 修复，改用工厂函数
-	loginLimiter   := newRateLimiter(loginMaxAttempts)
+	loginLimiter := newRateLimiter(loginMaxAttempts)
 	captchaLimiter := newRateLimiter(captchaMaxAttempts)
 
-	// 路由
 	api := r.Group("/api")
 	{
-		// 公开接口
 		api.GET("/captcha", captchaLimiter, captchaHandler.GetCaptcha)
 		api.POST("/auth/login", loginLimiter, authHandler.Login)
-		api.POST("/auth/refresh", authHandler.Refresh) // 公开，依赖 refresh token 自己验证
-		api.GET("/schedule/ical/subscribe", scheduleHandler.SubscribeICal) // 公开，token 验证
+		api.POST("/auth/refresh", authHandler.Refresh)
+		api.GET("/schedule/ical/subscribe", scheduleHandler.SubscribeICal)
 
-		// 需要认证的接口
 		protected := api.Group("")
 		protected.Use(authMiddleware.AuthRequired())
 		{
-			// 认证
 			protected.POST("/auth/logout", authHandler.Logout)
 			protected.GET("/auth/me", authHandler.Me)
 
-			// 课表
 			protected.GET("/schedule", scheduleHandler.GetSchedule)
 			protected.GET("/schedule/full", scheduleHandler.GetFullSchedule)
 			protected.GET("/schedule/conflicts", scheduleHandler.GetConflicts)
 
-			// 成绩
 			protected.GET("/score", scoreHandler.GetScore)
 			protected.GET("/score/semesters", scoreHandler.GetSemesters)
 			protected.GET("/score/stats", scoreHandler.GetScoreStats)
 
-			// 通知
 			protected.POST("/notify/register", notifyHandler.RegisterToken)
 			protected.POST("/notify/test", notifyHandler.TestNotify)
 
-			// iCal 订阅
 			protected.GET("/schedule/ical", scheduleHandler.GetICal)
 			protected.POST("/schedule/ical/token", scheduleHandler.GenerateICalToken)
 			protected.GET("/schedule/ical/token-info", scheduleHandler.GetICalTokenInfo)
 
-			// Webhook
 			protected.POST("/webhook/register", scheduleHandler.RegisterWebhook)
 			protected.POST("/webhook/trigger", scheduleHandler.TriggerWebhook)
 			protected.GET("/webhook/info", scheduleHandler.GetWebhookInfo)
@@ -165,12 +167,10 @@ func main() {
 		}
 	}
 
-	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"ok": 1})
 	})
 
-	// 根路径
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{"name": "jw-server-go", "version": "1.0.0"})
 	})
@@ -198,7 +198,6 @@ func main() {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
-	// 停止 JwService 后台 goroutine
 	service.GetJwService().Close()
 
 	log.Println("Server exited gracefully")

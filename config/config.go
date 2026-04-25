@@ -8,8 +8,25 @@ type Config struct {
 	Port             string
 	JWTSecret        string
 	JWTRefreshSecret string
-	AllowedOrigin    string // CORS 允许的源（SEC-3 修复）
-	SecureCookie     bool   // Secure Cookie 标志（SEC-2 修复）
+	AllowedOrigin    string
+	SecureCookie     bool
+	MySQL            MySQLConfig
+	Redis            RedisConfig
+}
+
+type MySQLConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	Database string
+}
+
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
+	DB       int
 }
 
 func Load() *Config {
@@ -28,14 +45,41 @@ func Load() *Config {
 		port = "3000"
 	}
 
-	// SEC-3 修复：CORS 源从环境变量读取，支持配置多个（逗号分隔）
 	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
 	if allowedOrigin == "" {
-		allowedOrigin = "http://localhost:5173" // 默认为本地开发地址
+		allowedOrigin = "http://localhost:5173"
 	}
 
-	// SEC-2 修复：Secure Cookie 从环境变量读取，生产环境应设为 true
 	secureCookie := os.Getenv("SECURE_COOKIE") == "true"
+
+	mysqlHost := os.Getenv("MYSQL_HOST")
+	if mysqlHost == "" {
+		mysqlHost = "localhost"
+	}
+	mysqlPort := os.Getenv("MYSQL_PORT")
+	if mysqlPort == "" {
+		mysqlPort = "3306"
+	}
+	mysqlUser := os.Getenv("MYSQL_USER")
+	if mysqlUser == "" {
+		mysqlUser = "root"
+	}
+	mysqlPassword := os.Getenv("MYSQL_PASSWORD")
+	mysqlDatabase := os.Getenv("MYSQL_DATABASE")
+	if mysqlDatabase == "" {
+		mysqlDatabase = "jww"
+	}
+
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "localhost"
+	}
+	redisPort := os.Getenv("REDIS_PORT")
+	if redisPort == "" {
+		redisPort = "6379"
+	}
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisDB := 0
 
 	return &Config{
 		Port:             port,
@@ -43,5 +87,18 @@ func Load() *Config {
 		JWTRefreshSecret: jwtRefreshSecret,
 		AllowedOrigin:    allowedOrigin,
 		SecureCookie:     secureCookie,
+		MySQL: MySQLConfig{
+			Host:     mysqlHost,
+			Port:     mysqlPort,
+			User:     mysqlUser,
+			Password: mysqlPassword,
+			Database: mysqlDatabase,
+		},
+		Redis: RedisConfig{
+			Host:     redisHost,
+			Port:     redisPort,
+			Password: redisPassword,
+			DB:       redisDB,
+		},
 	}
 }

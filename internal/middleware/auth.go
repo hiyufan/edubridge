@@ -9,25 +9,24 @@ import (
 )
 
 type AuthMiddleware struct {
-	jwtSecret       string
+	jwtSecret        string
 	jwtRefreshSecret string
 }
 
 func NewAuthMiddleware(jwtSecret, jwtRefreshSecret string) *AuthMiddleware {
 	return &AuthMiddleware{
-		jwtSecret:       jwtSecret,
+		jwtSecret:        jwtSecret,
 		jwtRefreshSecret: jwtRefreshSecret,
 	}
 }
 
-// Claims JWT Claims
 type Claims struct {
 	UID       string `json:"uid"`
 	SessionID string `json:"sessionId"`
+	TokenID   string `json:"tokenId"`
 	jwt.RegisteredClaims
 }
 
-// AuthRequired JWT 鉴权中间件
 func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")

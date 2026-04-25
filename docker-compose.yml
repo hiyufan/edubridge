@@ -9,3 +9,13 @@ services:
       - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET required}
       - PORT=3000
       - JW_URL=https://jw.fzrjxy.com
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-jww}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - ALLOWED_ORIGIN=${ALLOWED_ORIGIN:-http://localhost:5173}
+      - SECURE_COOKIE=${SECURE_COOKIE:-false}

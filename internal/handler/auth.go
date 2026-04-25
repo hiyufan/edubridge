@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -12,7 +14,6 @@ import (
 	"jww/pkg/response"
 )
 
-// getSessionID 安全提取 sessionId，带类型断言校验
 func getSessionID(c *gin.Context) (string, bool) {
 	val, exists := c.Get("sessionId")
 	if !exists {
@@ -27,7 +28,7 @@ type AuthHandler struct {
 	jwtRefreshSecret string
 	jwtExpires       time.Duration
 	refreshExpires   time.Duration
-	secureCookie     bool // SEC-2 修复：从配置读取 Secure 标志
+	secureCookie     bool
 }
 
 func NewAuthHandler(jwtSecret, jwtRefreshSecret string, secureCookie bool) *AuthHandler {
@@ -63,59 +64,100 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 生成 Access Token
 	accessToken, err := h.signToken(req.Username, req.SessionID, h.jwtSecret, h.jwtExpires)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "生成 Token 失败")
 		return
 	}
 
-	// 生成 Refresh Token 并设置 HttpOnly Cookie（SEC-2 修复：Secure 标志从配置读取）
-	refreshToken, err := h.signToken(req.Username, req.SessionID, h.jwtRefreshSecret, h.refreshExpires)
+	refreshTokenID := fmt.Sprintf("%s_%d", req.Username, time.Now().UnixNano())
+	refreshToken, err := h.signTokenWithID(req.Username, req.SessionID, refreshTokenID, h.jwtRefreshSecret, h.refreshExpires)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "生成 Token 失败")
 		return
 	}
 
+	tokenSvc := service.GetTokenService()
+	expiresAt := time.Now().Add(h.refreshExpires)
+	if err := tokenSvc.StoreRefreshToken(req.Username, refreshTokenID, "web", c.Request.UserAgent(), expiresAt); err != nil {
+		log.Printf("[Login] StoreRefreshToken error: %v", err)
+		response.Error(c, http.StatusInternalServerError, "存储 Token 失败")
+		return
+	}
+
 	c.SetCookie("refreshToken", refreshToken, int(h.refreshExpires.Seconds()), "/", "", h.secureCookie, true)
+	log.Printf("[Login] Cookie set, refreshTokenID: %s", refreshTokenID)
 
 	response.SuccessWithToken(c, accessToken, req.Username, int(h.jwtExpires.Seconds()))
 }
 
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	refreshTokenStr, err := c.Cookie("refreshToken")
+	log.Printf("[Refresh] Cookie error: %v", err)
 	if err != nil {
+		log.Printf("[Refresh] No cookie found: %v", err)
 		response.ErrorWithInfo(c, "请重新登录")
 		return
 	}
+	log.Printf("[Refresh] Cookie found, length: %d", len(refreshTokenStr))
 
 	claims := &middleware.Claims{}
 	token, err := jwt.ParseWithClaims(refreshTokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-		// SEC-1: 校验签名算法，防止 alg:none 攻击
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrSignatureInvalid
 		}
 		return []byte(h.jwtRefreshSecret), nil
 	})
 
-	if err != nil || !token.Valid {
+	if err != nil {
+		log.Printf("[Refresh] JWT parse error: %v", err)
 		response.ErrorWithInfo(c, "登录已过期，请重新登录")
 		return
 	}
 
-	// 生成新的 Access Token
+	if !token.Valid {
+		log.Printf("[Refresh] Token invalid")
+		response.ErrorWithInfo(c, "登录已过期，请重新登录")
+		return
+	}
+
+	log.Printf("[Refresh] Token parsed, TokenID: %s, UID: %s", claims.TokenID, claims.UID)
+
+	tokenSvc := service.GetTokenService()
+	userID, err := tokenSvc.ValidateRefreshToken(claims.TokenID)
+	if err != nil {
+		log.Printf("[Refresh] ValidateRefreshToken error: %v", err)
+		response.ErrorWithInfo(c, "登录已过期，请重新登录")
+		return
+	}
+
+	if userID != claims.UID {
+		log.Printf("[Refresh] UserID mismatch: %s != %s", userID, claims.UID)
+		response.ErrorWithInfo(c, "登录已过期，请重新登录")
+		return
+	}
+
+	log.Printf("[Refresh] Validation success, userID: %s", userID)
+
 	newAccessToken, err := h.signToken(claims.UID, claims.SessionID, h.jwtSecret, h.jwtExpires)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "生成 Token 失败")
 		return
 	}
 
-	// BUG-9 修复：Refresh Token 滑动更新 - 续签后重新签发 Refresh Token 并更新 Cookie 过期时间
-	newRefreshToken, err := h.signToken(claims.UID, claims.SessionID, h.jwtRefreshSecret, h.refreshExpires)
+	newRefreshTokenID, err := tokenSvc.RotateRefreshToken(claims.TokenID, claims.UID, "web", c.Request.UserAgent(), time.Now().Add(h.refreshExpires))
+	if err != nil {
+		log.Printf("[Refresh] RotateRefreshToken error: %v", err)
+		response.Error(c, http.StatusInternalServerError, "刷新 Token 失败")
+		return
+	}
+
+	newRefreshToken, err := h.signTokenWithID(claims.UID, claims.SessionID, newRefreshTokenID, h.jwtRefreshSecret, h.refreshExpires)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "生成 Token 失败")
 		return
 	}
+
 	c.SetCookie("refreshToken", newRefreshToken, int(h.refreshExpires.Seconds()), "/", "", h.secureCookie, true)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -126,6 +168,18 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
+	refreshTokenStr, err := c.Cookie("refreshToken")
+	if err == nil && refreshTokenStr != "" {
+		claims := &middleware.Claims{}
+		_, err := jwt.ParseWithClaims(refreshTokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+			return []byte(h.jwtRefreshSecret), nil
+		})
+		if err == nil {
+			tokenSvc := service.GetTokenService()
+			tokenSvc.RevokeRefreshToken(claims.TokenID, claims.UID)
+		}
+	}
+
 	c.SetCookie("refreshToken", "", -1, "/", "", h.secureCookie, true)
 	response.SuccessWithInfo(c, "已退出登录")
 }
@@ -137,11 +191,25 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	})
 }
 
-// signToken 使用 *middleware.Claims 结构体签发 Token（与解析方保持一致）
 func (h *AuthHandler) signToken(uid, sessionId, secret string, expire time.Duration) (string, error) {
 	claims := &middleware.Claims{
 		UID:       uid,
 		SessionID: sessionId,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expire)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
+}
+
+func (h *AuthHandler) signTokenWithID(uid, sessionId, tokenID, secret string, expire time.Duration) (string, error) {
+	claims := &middleware.Claims{
+		UID:       uid,
+		SessionID: sessionId,
+		TokenID:   tokenID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expire)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
