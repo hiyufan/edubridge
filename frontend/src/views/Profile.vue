@@ -130,7 +130,7 @@ const getAvatarLetter = () => {
 <template>
   <div class="profile-page">
     <!-- Profile Header Card -->
-    <div class="profile-card animate-apple-fade-in">
+    <div class="profile-card animate-warm-fade-in">
       <div class="profile-avatar">
         <span class="avatar-letter">{{ getAvatarLetter() }}</span>
         <div class="avatar-ring"></div>
@@ -146,7 +146,7 @@ const getAvatarLetter = () => {
     </div>
 
     <!-- Settings Groups -->
-    <div class="settings-section animate-apple-fade-in stagger-1">
+    <div class="settings-section animate-warm-fade-in stagger-1">
       <div class="apple-section-header">账户信息</div>
       <div class="apple-grouped-list">
         <div class="apple-grouped-item">
@@ -215,7 +215,7 @@ const getAvatarLetter = () => {
     </div>
 
     <!-- Theme Settings -->
-    <div class="settings-section animate-apple-fade-in stagger-2">
+    <div class="settings-section animate-warm-fade-in stagger-2">
       <div class="apple-section-header">外观</div>
       <div class="apple-grouped-list">
         <div class="apple-grouped-item">
@@ -272,7 +272,7 @@ const getAvatarLetter = () => {
     </div>
 
     <!-- Notification Settings -->
-    <div class="settings-section animate-apple-fade-in stagger-2">
+    <div class="settings-section animate-warm-fade-in stagger-2">
       <div class="apple-section-header">通知</div>
       <div class="apple-grouped-list">
         <div class="apple-grouped-item item-clickable" @click="handleNotify">
@@ -299,7 +299,7 @@ const getAvatarLetter = () => {
     </div>
 
     <!-- 功能 07: iCal 订阅信息 -->
-    <div class="settings-section animate-apple-fade-in stagger-2" v-if="iCalTokenInfo">
+    <div class="settings-section animate-warm-fade-in stagger-2" v-if="iCalTokenInfo">
       <div class="apple-section-header">日历订阅</div>
       <div class="apple-grouped-list">
         <div class="apple-grouped-item">
@@ -333,7 +333,7 @@ const getAvatarLetter = () => {
     </div>
 
     <!-- 功能 09: Webhook 配置 -->
-    <div class="settings-section animate-apple-fade-in stagger-2">
+    <div class="settings-section animate-warm-fade-in stagger-2">
       <div class="apple-section-header">Webhook 推送</div>
       <div class="apple-grouped-list">
         <div class="apple-grouped-item">
@@ -386,7 +386,7 @@ const getAvatarLetter = () => {
     </div>
 
     <!-- Security Settings -->
-    <div class="settings-section animate-apple-fade-in stagger-2">
+    <div class="settings-section animate-warm-fade-in stagger-2">
       <div class="apple-section-header">安全设置</div>
       <div class="apple-grouped-list">
         <div class="apple-grouped-item item-clickable">
@@ -441,12 +441,12 @@ const getAvatarLetter = () => {
     </div>
 
     <!-- Version Info -->
-    <div class="version-info animate-apple-fade-in stagger-3">
+    <div class="version-info animate-warm-fade-in stagger-3">
       <span>教务系统 v1.0.0</span>
     </div>
 
     <!-- Logout Button -->
-    <div class="logout-section animate-apple-fade-in stagger-4">
+    <div class="logout-section animate-warm-fade-in stagger-4">
       <button class="apple-btn logout-btn" @click="handleLogout">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="logout-icon">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
@@ -472,11 +472,12 @@ const getAvatarLetter = () => {
   flex-direction: column;
   align-items: center;
   background: white;
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   padding: 32px 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
   position: relative;
   overflow: hidden;
+  border: 1px solid var(--color-border-light);
 }
 
 .profile-card::before {
@@ -486,8 +487,8 @@ const getAvatarLetter = () => {
   left: 0;
   right: 0;
   height: 80px;
-  background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
-  border-radius: 20px 20px 0 0;
+  background: var(--color-primary);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .profile-avatar {
@@ -504,7 +505,7 @@ const getAvatarLetter = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #007AFF, #5856D6);
+  background: var(--color-primary);
   border-radius: 50%;
   font-size: 36px;
   font-weight: 600;
@@ -517,7 +518,7 @@ const getAvatarLetter = () => {
   inset: -4px;
   border-radius: 50%;
   border: 3px solid white;
-  box-shadow: 0 4px 16px rgba(0, 122, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(120, 113, 108, 0.15);
 }
 
 .profile-info {
@@ -529,13 +530,13 @@ const getAvatarLetter = () => {
 .profile-name {
   font-size: 22px;
   font-weight: 700;
-  color: #1d1d1f;
+  color: var(--color-text);
   letter-spacing: -0.024em;
 }
 
 .profile-role {
   font-size: 14px;
-  color: #8e8e93;
+  color: var(--color-text-muted);
   margin-top: 4px;
   font-weight: 500;
 }
@@ -546,14 +547,14 @@ const getAvatarLetter = () => {
   gap: 6px;
   margin-top: 12px;
   padding: 6px 14px;
-  background: rgba(52, 199, 89, 0.1);
+  background: rgba(120, 113, 108, 0.08);
   border-radius: 20px;
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
-  background: #34C759;
+  background: #A16207;
   border-radius: 50%;
   animation: statusPulse 2s ease-in-out infinite;
 }
@@ -566,7 +567,7 @@ const getAvatarLetter = () => {
 .status-text {
   font-size: 13px;
   font-weight: 600;
-  color: #34C759;
+  color: #A16207;
 }
 
 /* Settings Section */
@@ -577,9 +578,10 @@ const getAvatarLetter = () => {
 
 .apple-grouped-list {
   background: white;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border-light);
 }
 
 .apple-grouped-item {
@@ -587,7 +589,7 @@ const getAvatarLetter = () => {
   align-items: center;
   padding: 14px 16px;
   background: white;
-  border-bottom: 0.5px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 0.5px solid var(--color-border);
 }
 
 .apple-grouped-item:last-child {
@@ -601,14 +603,14 @@ const getAvatarLetter = () => {
   width: 32px;
   height: 32px;
   margin-right: 12px;
-  background: #f2f2f7;
-  border-radius: 8px;
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
 }
 
 .item-icon svg {
   width: 18px;
   height: 18px;
-  color: #007AFF;
+  color: var(--color-primary);
 }
 
 .item-content {
@@ -620,17 +622,17 @@ const getAvatarLetter = () => {
 .item-label {
   font-size: 15px;
   font-weight: 500;
-  color: #1d1d1f;
+  color: var(--color-text);
 }
 
 .item-value {
   font-size: 13px;
-  color: #8e8e93;
+  color: var(--color-text-muted);
   margin-top: 2px;
 }
 
 .item-value.status-active {
-  color: #34C759;
+  color: #A16207;
   font-weight: 600;
 }
 
@@ -645,7 +647,7 @@ const getAvatarLetter = () => {
 .item-arrow svg {
   width: 16px;
   height: 16px;
-  color: #c7c7cc;
+  color: var(--color-border);
 }
 
 .item-clickable {
@@ -654,14 +656,14 @@ const getAvatarLetter = () => {
 }
 
 .item-clickable:hover {
-  background: rgba(0, 122, 255, 0.03);
+  background: var(--color-bg);
 }
 
 /* Version Info */
 .version-info {
   text-align: center;
   font-size: 12px;
-  color: #c7c7cc;
+  color: var(--color-text-muted);
   padding: 8px;
 }
 
@@ -673,14 +675,15 @@ const getAvatarLetter = () => {
 .logout-btn {
   width: 100%;
   height: 54px;
-  background: rgba(255, 59, 48, 0.08);
-  color: #FF3B30;
+  background: rgba(220, 38, 38, 0.06);
+  color: #DC2626;
   border: none;
   font-weight: 600;
+  border-radius: var(--radius-md);
 }
 
 .logout-btn:hover {
-  background: rgba(255, 59, 48, 0.15);
+  background: rgba(220, 38, 38, 0.1);
 }
 
 .logout-icon {
@@ -698,26 +701,26 @@ const getAvatarLetter = () => {
 
 .theme-mode-btn {
   padding: 4px 12px;
-  border: 1.5px solid #e5e5ea;
+  border: 1.5px solid var(--color-border);
   border-radius: 20px;
   background: white;
   font-size: 12px;
   font-weight: 500;
-  color: #636366;
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .theme-mode-btn.active {
-  background: #007AFF;
-  border-color: #007AFF;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
   color: white;
   font-weight: 600;
 }
 
 .theme-mode-btn:hover:not(.active) {
-  border-color: #007AFF;
-  color: #007AFF;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 /* Color Swatches */
@@ -776,34 +779,140 @@ const getAvatarLetter = () => {
   flex-shrink: 0;
 }
 
-.wh-status.success { color: #34C759; }
-.wh-status.fail { color: #FF3B30; }
+.wh-status.success { color: #A16207; }
+.wh-status.fail { color: #DC2626; }
+
+/* =====================
+   PC Responsive (lg+)
+   ===================== */
+@media (min-width: 1024px) {
+  .profile-page {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 24px;
+    max-width: 1100px;
+    align-items: start;
+  }
+
+  /* Header spans full width on left column */
+  .profile-card {
+    grid-column: 1;
+    grid-row: 1;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 36px 28px 28px;
+    border-radius: var(--radius-xl);
+  }
+
+  .profile-info {
+    margin-top: 16px;
+  }
+
+  .profile-name {
+    font-size: 26px;
+  }
+
+  /* Settings sections stack in right column */
+  .settings-section {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-items: flex-start;
+  }
+
+  .settings-section:nth-child(2) {
+    grid-row: 1;
+  }
+
+  .apple-grouped-list {
+    border-radius: var(--radius-xl);
+  }
+
+  .apple-grouped-item {
+    padding: 16px 20px;
+  }
+
+  .apple-section-header {
+    font-size: 12px;
+    padding: 0 4px 8px;
+    letter-spacing: 0.08em;
+  }
+
+  .item-icon {
+    width: 36px;
+    height: 36px;
+    margin-right: 16px;
+  }
+
+  .item-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .item-label {
+    font-size: 15px;
+  }
+
+  .item-value {
+    font-size: 14px;
+  }
+
+  .theme-mode-btn {
+    padding: 5px 16px;
+    font-size: 13px;
+    border-radius: 20px;
+  }
+
+  .color-swatch {
+    width: 28px;
+    height: 28px;
+  }
+
+  .logout-section {
+    grid-column: 1;
+    grid-row: 2;
+    padding: 0;
+  }
+
+  .logout-btn {
+    border-radius: var(--radius-lg);
+    height: 48px;
+    font-size: 15px;
+  }
+
+  .version-info {
+    grid-column: 1;
+    grid-row: 3;
+    padding: 8px 0 0;
+  }
+}
 </style>
 
 <style>
 /* Global overrides for Element Plus MessageBox */
 .apple-message-box .el-message-box__headerbtn .el-message-box__close {
-  color: #8e8e93;
+  color: var(--color-text-muted);
 }
 
 .apple-message-box .el-message-box__title {
   font-size: 17px;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--color-text);
 }
 
 .apple-message-box .el-message-box__message {
   font-size: 14px;
-  color: #636366;
+  color: var(--color-text-muted);
 }
 
 .apple-message-box .el-button--primary {
-  background: #FF3B30 !important;
-  border-color: #FF3B30 !important;
+  background: #DC2626 !important;
+  border-color: #DC2626 !important;
 }
 
 .apple-message-box .logout-confirm-btn {
-  background: #FF3B30 !important;
-  border-color: #FF3B30 !important;
+  background: #DC2626 !important;
+  border-color: #DC2626 !important;
 }
 </style>

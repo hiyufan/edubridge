@@ -16,7 +16,6 @@ const loginForm = ref({
 })
 
 const captchaUrl = ref('')
-const captchaKey = ref(0)
 const loading = ref(false)
 
 const loginTypes = [
@@ -30,7 +29,6 @@ const activeLoginType = ref(0)
 const fetchCaptcha = async () => {
   try {
     const res = await request.get('/captcha')
-    captchaKey.value++
     captchaUrl.value = res.data
   } catch (error) {
     ElMessage.error('获取验证码失败')
@@ -60,26 +58,17 @@ const handleLogin = async () => {
       loginType: loginTypes[activeLoginType.value].value,
       sessionId: request.sessionId
     }
-    console.log('[Login] Sending request...')
     const res = await request.post('/auth/login', payload)
-    console.log('[Login] Response:', res)
-    console.log('[Login] Token:', res.token)
     userStore.setUser({
       token: res.token,
       uid: res.uid
     })
-    console.log('[Login] User set, navigating to /')
     ElMessage.success('登录成功')
-    router.push('/').then(() => {
-      console.log('[Login] Navigation complete')
-    }).catch(err => {
-      console.error('[Login] Navigation error:', err)
-    })
+    router.push('/')
 
     request.get('/schedule?week=1').catch(() => {})
     request.get('/score').catch(() => {})
   } catch (error) {
-    console.error('[Login] Error:', error)
   } finally {
     loading.value = false
   }
@@ -88,109 +77,118 @@ const handleLogin = async () => {
 
 <template>
   <div class="login-page">
-    <div class="login-container">
-      <div class="login-left">
-        <div class="brand">
-          <div class="logo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="2" y="3" width="20" height="18" rx="2"/>
-              <path d="M8 10h8M8 14h5"/>
-            </svg>
-          </div>
-          <div class="brand-text">
-            <h1>教务系统</h1>
-            <p>Academic Administration Portal</p>
-          </div>
+    <!-- Left brand panel (desktop) -->
+    <div class="brand-panel">
+      <div class="brand-inner">
+        <div class="brand-logo">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="8" width="40" height="32" rx="4" fill="#78716C"/>
+            <rect x="10" y="14" width="28" height="3" rx="1.5" fill="white" opacity="0.9"/>
+            <rect x="10" y="20" width="20" height="2.5" rx="1.25" fill="white" opacity="0.6"/>
+            <rect x="10" y="25" width="24" height="2.5" rx="1.25" fill="white" opacity="0.6"/>
+            <rect x="10" y="30" width="16" height="2.5" rx="1.25" fill="white" opacity="0.4"/>
+            <path d="M38 8 L44 12 L44 12 L38 16" stroke="#A16207" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M38 32 L44 36 L44 36 L38 40" stroke="#A16207" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
         </div>
-        <div class="features">
-          <div class="feature">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="3" y="4" width="18" height="18" rx="2"/>
-              <line x1="16" y1="2" x2="16" y2="6"/>
-              <line x1="8" y1="2" x2="8" y2="6"/>
-              <line x1="3" y1="10" x2="21" y2="10"/>
-            </svg>
-            <span>课表查询</span>
-          </div>
-          <div class="feature">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-            </svg>
-            <span>成绩查询</span>
-          </div>
-          <div class="feature">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            </svg>
-            <span>安全可靠</span>
-          </div>
-        </div>
+        <h1 class="brand-title">教务系统</h1>
+        <p class="brand-subtitle">University Academic Portal</p>
+        <div class="brand-divider"></div>
+        <p class="brand-desc">简洁、高效的课程与成绩管理平台</p>
       </div>
+      <div class="brand-decoration">
+        <div class="deco-line deco-1"></div>
+        <div class="deco-line deco-2"></div>
+        <div class="deco-line deco-3"></div>
+      </div>
+    </div>
 
-      <div class="login-right">
-        <div class="login-box">
-          <div class="login-header">
-            <h2>用户登录</h2>
-            <p>请输入您的账号信息</p>
-          </div>
+    <!-- Right login form -->
+    <div class="form-panel">
+      <div class="form-container warm-scale-in">
+        <div class="form-header">
+          <h2 class="form-title">登录</h2>
+          <p class="form-hint">请输入您的账号信息</p>
+        </div>
 
-          <div class="login-type-tabs">
+        <!-- Login Type Selector -->
+        <div class="login-type-selector">
+          <div class="warm-segmented">
             <button
               v-for="(type, idx) in loginTypes"
               :key="type.value"
-              class="type-tab"
+              class="warm-segmented-item"
               :class="{ active: activeLoginType === idx }"
               @click="activeLoginType = idx"
             >
               {{ type.label }}
             </button>
           </div>
+        </div>
 
-          <form class="login-form" @submit.prevent="handleLogin">
-            <div class="form-group">
-              <label>账号</label>
+        <!-- Form -->
+        <div class="login-form">
+          <div class="form-item warm-fade-in stagger-1">
+            <label class="form-label">学号 / 账号</label>
+            <input
+              v-model="loginForm.username"
+              type="text"
+              class="warm-input"
+              placeholder="请输入学号"
+              autocomplete="username"
+            />
+          </div>
+
+          <div class="form-item warm-fade-in stagger-2">
+            <label class="form-label">密码</label>
+            <input
+              v-model="loginForm.password"
+              type="password"
+              class="warm-input"
+              placeholder="请输入密码"
+              autocomplete="current-password"
+              @keyup.enter="handleLogin"
+            />
+          </div>
+
+          <div class="form-item warm-fade-in stagger-3">
+            <label class="form-label">验证码</label>
+            <div class="captcha-wrapper">
               <input
-                v-model="loginForm.username"
+                v-model="loginForm.captcha"
                 type="text"
-                class="input"
-                placeholder="请输入学号/工号"
-                autocomplete="username"
+                class="warm-input captcha-input"
+                placeholder="请输入验证码"
+                maxlength="4"
+                @keyup.enter="handleLogin"
               />
-            </div>
-
-            <div class="form-group">
-              <label>密码</label>
-              <input
-                v-model="loginForm.password"
-                type="password"
-                class="input"
-                placeholder="请输入密码"
-                autocomplete="current-password"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>验证码</label>
-              <div class="captcha-row">
-                <input
-                  v-model="loginForm.captcha"
-                  type="text"
-                  class="input captcha-input"
-                  placeholder="请输入验证码"
-                  maxlength="4"
-                />
-                <div class="captcha-img" @click="fetchCaptcha">
-                  <img :key="captchaKey" :src="captchaUrl" alt="验证码" />
+              <div class="captcha-image" @click="fetchCaptcha">
+                <img :src="captchaUrl" alt="验证码" />
+                <div class="captcha-overlay">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                  <span>点击刷新</span>
                 </div>
               </div>
             </div>
+          </div>
 
-            <button type="submit" class="submit-btn" :disabled="loading">
-              <span v-if="!loading">登 录</span>
-              <span v-else>登录中...</span>
-            </button>
-          </form>
+          <button
+            class="warm-btn warm-btn-primary login-btn warm-fade-in stagger-4"
+            :class="{ loading }"
+            :disabled="loading"
+            @click="handleLogin"
+          >
+            <span v-if="!loading">登 录</span>
+            <span v-else class="loading-text">登录中...</span>
+          </button>
+        </div>
+
+        <!-- Footer -->
+        <div class="login-footer warm-fade-in stagger-5">
+          <p>登录即表示同意 <a href="#">服务条款</a> 和 <a href="#">隐私政策</a></p>
         </div>
       </div>
     </div>
@@ -201,149 +199,141 @@ const handleLogin = async () => {
 .login-page {
   min-height: 100vh;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
+  background: var(--color-bg);
 }
 
-.login-container {
-  display: flex;
-  width: 900px;
-  max-width: 100%;
-  background: #fff;
-  border-radius: 12px;
+/* Brand Panel - Left */
+.brand-panel {
+  display: none;
+  width: 45%;
+  background: var(--color-primary);
+  position: relative;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
 }
 
-.login-left {
-  flex: 1;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 48px 40px;
+@media (min-width: 768px) {
+  .brand-panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.brand-inner {
+  position: relative;
+  z-index: 1;
+  padding: 48px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
   gap: 16px;
-  margin-bottom: 48px;
 }
 
-.logo {
-  width: 48px;
-  height: 48px;
-  background: rgba(255,255,255,0.2);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.brand-logo svg {
+  width: 64px;
+  height: 64px;
 }
 
-.logo svg {
-  width: 26px;
-  height: 26px;
-  color: #fff;
+.brand-title {
+  font-family: var(--font-serif);
+  font-size: 36px;
+  font-weight: 700;
+  color: white;
+  letter-spacing: 0.02em;
+  margin-top: 8px;
 }
 
-.brand-text h1 {
-  font-size: 22px;
-  font-weight: 600;
-  color: #fff;
-  margin-bottom: 4px;
-}
-
-.brand-text p {
+.brand-subtitle {
   font-size: 13px;
-  color: rgba(255,255,255,0.8);
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.features {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.brand-divider {
+  width: 40px;
+  height: 2px;
+  background: var(--color-accent);
+  margin: 8px 0;
 }
 
-.feature {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  color: #fff;
-}
-
-.feature svg {
-  width: 20px;
-  height: 20px;
-  opacity: 0.9;
-}
-
-.feature span {
+.brand-desc {
   font-size: 14px;
-  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.6;
+  max-width: 280px;
 }
 
-.login-right {
-  width: 420px;
+/* Brand decoration lines */
+.brand-decoration {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.deco-line {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 2px;
+}
+
+.deco-1 {
+  width: 100%;
+  height: 1px;
+  top: 30%;
+}
+
+.deco-2 {
+  width: 1px;
+  height: 100%;
+  left: 30%;
+}
+
+.deco-3 {
+  width: 200px;
+  height: 200px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: 50%;
+  top: 50%;
+  left: 60%;
+  transform: translate(-50%, -50%);
+}
+
+/* Form Panel - Right */
+.form-panel {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 40px;
+  padding: 32px 24px;
 }
 
-.login-box {
+.form-container {
   width: 100%;
-  max-width: 320px;
+  max-width: 380px;
 }
 
-.login-header {
-  text-align: center;
+.form-header {
   margin-bottom: 28px;
 }
 
-.login-header h2 {
-  font-size: 20px;
-  font-weight: 600;
-  color: #1F1F1F;
-  margin-bottom: 6px;
+.form-title {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: 0.01em;
 }
 
-.login-header p {
-  font-size: 13px;
-  color: #666;
+.form-hint {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
 }
 
-.login-type-tabs {
+.login-type-selector {
   display: flex;
-  background: #F7F8FA;
-  padding: 4px;
-  border-radius: 8px;
   margin-bottom: 24px;
-}
-
-.type-tab {
-  flex: 1;
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #666;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 150ms ease;
-}
-
-.type-tab:hover {
-  color: #333;
-}
-
-.type-tab.active {
-  background: #fff;
-  color: #1677FF;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
 }
 
 .login-form {
@@ -352,40 +342,19 @@ const handleLogin = async () => {
   gap: 18px;
 }
 
-.form-group {
+.form-item {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.form-group label {
+.form-label {
   font-size: 13px;
   font-weight: 500;
-  color: #333;
+  color: var(--color-text-secondary);
 }
 
-.input {
-  width: 100%;
-  padding: 11px 12px;
-  font-size: 14px;
-  color: #1F1F1F;
-  background: #fff;
-  border: 1px solid #E8E8E8;
-  border-radius: 6px;
-  transition: all 150ms ease;
-  outline: none;
-}
-
-.input:focus {
-  border-color: #1677FF;
-  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
-}
-
-.input::placeholder {
-  color: #999;
-}
-
-.captcha-row {
+.captcha-wrapper {
   display: flex;
   gap: 10px;
 }
@@ -394,70 +363,85 @@ const handleLogin = async () => {
   flex: 1;
 }
 
-.captcha-img {
-  width: 120px;
-  height: 42px;
-  border: 1px solid #E8E8E8;
-  border-radius: 6px;
+.captcha-image {
+  position: relative;
+  width: 140px;
+  height: 50px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
   flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  background: white;
+  transition: border-color 0.2s ease;
+}
+
+.captcha-image:hover {
+  border-color: var(--color-primary);
+}
+
+.captcha-image img {
+  width: 140px;
+  height: 50px;
+  object-fit: contain;
+  display: block;
+}
+
+.captcha-overlay {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
+  gap: 4px;
+  font-size: 11px;
+  color: white;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
-.captcha-img:hover {
-  border-color: #1677FF;
+.captcha-image:hover .captcha-overlay {
+  opacity: 1;
 }
 
-.captcha-img img {
+.captcha-overlay svg {
+  width: 12px;
+  height: 12px;
+}
+
+.login-btn {
   width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.submit-btn {
-  width: 100%;
-  padding: 12px;
-  font-size: 14px;
-  font-weight: 500;
-  color: #fff;
-  background: #1677FF;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 150ms ease;
+  height: 50px;
   margin-top: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
 }
 
-.submit-btn:hover:not(:disabled) {
-  background: #4096FF;
-}
-
-.submit-btn:disabled {
+.login-btn.loading {
+  pointer-events: none;
   opacity: 0.7;
-  cursor: not-allowed;
 }
 
-@media (max-width: 768px) {
-  .login-container {
-    flex-direction: column;
-    width: 100%;
-  }
+.loading-text {
+  letter-spacing: 0.1em;
+}
 
-  .login-left {
-    padding: 32px 24px;
-  }
+.login-footer {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
 
-  .features {
-    display: none;
-  }
+.login-footer a {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 500;
+}
 
-  .login-right {
-    width: 100%;
-    padding: 32px 24px;
-  }
+.login-footer a:hover {
+  text-decoration: underline;
 }
 </style>

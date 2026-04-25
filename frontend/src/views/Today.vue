@@ -42,12 +42,12 @@ const freeMessage = computed(() => {
 
 // 课程颜色
 const courseColors = [
-  { bg: '#007AFF', light: 'rgba(0, 122, 255, 0.15)', text: '#007AFF' },
-  { bg: '#34C759', light: 'rgba(52, 199, 89, 0.15)', text: '#34C759' },
-  { bg: '#FF9500', light: 'rgba(255, 149, 0, 0.15)', text: '#FF9500' },
-  { bg: '#AF52DE', light: 'rgba(175, 82, 222, 0.15)', text: '#AF52DE' },
-  { bg: '#FF2D55', light: 'rgba(255, 45, 85, 0.15)', text: '#FF2D55' },
-  { bg: '#5AC8FA', light: 'rgba(90, 200, 250, 0.15)', text: '#5AC8FA' },
+  { bg: '#78716C', light: 'rgba(120, 113, 108, 0.1)' },
+  { bg: '#A16207', light: 'rgba(161, 98, 7, 0.1)' },
+  { bg: '#15803D', light: 'rgba(21, 128, 61, 0.1)' },
+  { bg: '#B45309', light: 'rgba(180, 83, 9, 0.1)' },
+  { bg: '#0369A1', light: 'rgba(3, 105, 161, 0.1)' },
+  { bg: '#7C3AED', light: 'rgba(124, 58, 237, 0.1)' },
 ]
 
 // P6 修复：computed 缓存 name→color 映射，render 时不再重复 hash 计算
@@ -84,7 +84,7 @@ onMounted(() => {
 <template>
   <div class="today-page">
     <!-- Date Header -->
-    <div class="date-header animate-apple-fade-in">
+    <div class="date-header animate-warm-fade-in">
       <div class="date-main">
         <span class="date-month-day">{{ todayDate }}</span>
         <span class="date-weekday" :class="{ weekend: todayWeekday === '周六' || todayWeekday === '周日' }">
@@ -102,7 +102,7 @@ onMounted(() => {
     </div>
 
     <!-- Course Summary -->
-    <div class="summary-card animate-apple-fade-in stagger-1">
+    <div class="summary-card animate-warm-fade-in stagger-1">
       <div class="summary-left">
         <div class="summary-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
@@ -130,7 +130,7 @@ onMounted(() => {
       <div
         v-for="(course, idx) in todayCourses"
         :key="`${course.dayOfWeek}-${course.periodStart}`"
-        class="course-card animate-apple-fade-in"
+        class="course-card animate-warm-fade-in"
         :class="`stagger-${idx + 2}`"
         :style="{
           backgroundColor: getCourseColor(course.name).light,
@@ -177,14 +177,14 @@ onMounted(() => {
     </div>
 
     <!-- Empty State -->
-    <div v-else class="empty-today animate-apple-fade-in stagger-2">
+    <div v-else class="empty-today animate-warm-fade-in stagger-2">
       <div class="empty-emoji">☀️</div>
       <div class="empty-text">今日无课安排</div>
       <div class="empty-sub">好好享受难得的空闲时间吧</div>
     </div>
 
     <!-- Week Pills -->
-    <div class="week-nav animate-apple-fade-in stagger-3">
+    <div class="week-nav animate-warm-fade-in stagger-3">
       <router-link to="/schedule" class="week-link">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
           <rect x="3" y="4" width="18" height="18" rx="2"/>
@@ -205,8 +205,8 @@ onMounted(() => {
 
 /* Date Header */
 .date-header {
-  background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
-  border-radius: 20px;
+  background: var(--color-primary);
+  border-radius: var(--radius-lg);
   padding: 24px 24px 20px;
   color: white;
   position: relative;
@@ -216,22 +216,22 @@ onMounted(() => {
 .date-header::before {
   content: '';
   position: absolute;
-  top: -30px;
-  right: -30px;
-  width: 120px;
-  height: 120px;
-  background: rgba(255, 255, 255, 0.1);
+  top: -40px;
+  right: -20px;
+  width: 160px;
+  height: 160px;
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 50%;
 }
 
 .date-header::after {
   content: '';
   position: absolute;
-  bottom: -20px;
-  right: 40px;
-  width: 80px;
-  height: 80px;
-  background: rgba(255, 255, 255, 0.08);
+  bottom: -30px;
+  right: 60px;
+  width: 100px;
+  height: 100px;
+  background: rgba(255, 255, 255, 0.03);
   border-radius: 50%;
 }
 
@@ -258,7 +258,7 @@ onMounted(() => {
 }
 
 .date-weekday.weekend {
-  color: #FFD60A;
+  color: #FCD34D;
 }
 
 .date-semester {
@@ -295,8 +295,8 @@ onMounted(() => {
 .summary-icon {
   width: 40px;
   height: 40px;
-  background: rgba(0, 122, 255, 0.1);
-  border-radius: 10px;
+  background: rgba(120, 113, 108, 0.1);
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -305,26 +305,26 @@ onMounted(() => {
 .summary-icon svg {
   width: 20px;
   height: 20px;
-  color: #007AFF;
+  color: var(--color-primary);
 }
 
 .summary-count {
   font-size: 28px;
   font-weight: 700;
-  color: #1d1d1f;
-  letter-spacing: -0.03em;
+  color: var(--color-text);
+  letter-spacing: -0.02em;
   line-height: 1;
 }
 
 .summary-label {
   font-size: 12px;
-  color: #8e8e93;
+  color: var(--color-text-muted);
   margin-top: 2px;
 }
 
 .summary-tip {
   font-size: 13px;
-  color: #8e8e93;
+  color: var(--color-text-muted);
   text-align: right;
 }
 
@@ -359,20 +359,20 @@ onMounted(() => {
 .time-start {
   font-size: 13px;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--color-text);
 }
 
 .time-divider {
   width: 1px;
   flex: 1;
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--color-border);
   min-height: 12px;
 }
 
 .time-end {
   font-size: 13px;
   font-weight: 600;
-  color: #1d1d1f;
+  color: var(--color-text);
 }
 
 .course-info-col {
@@ -385,9 +385,9 @@ onMounted(() => {
 
 .course-name {
   font-size: 16px;
-  font-weight: 700;
-  color: #1d1d1f;
-  letter-spacing: -0.02em;
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: 0;
 }
 
 .course-meta {
@@ -401,7 +401,7 @@ onMounted(() => {
   align-items: center;
   gap: 4px;
   font-size: 13px;
-  color: #8e8e93;
+  color: var(--color-text-muted);
 }
 
 .meta-item svg {
@@ -418,10 +418,10 @@ onMounted(() => {
 .scope-tag {
   font-size: 11px;
   font-weight: 500;
-  color: #007AFF;
-  background: rgba(0, 122, 255, 0.08);
+  color: var(--color-primary);
+  background: rgba(120, 113, 108, 0.08);
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .period-badge {
@@ -475,16 +475,18 @@ onMounted(() => {
   gap: 6px;
   font-size: 14px;
   font-weight: 500;
-  color: #007AFF;
+  color: var(--color-primary);
   text-decoration: none;
   padding: 10px 16px;
-  border-radius: 10px;
-  background: rgba(0, 122, 255, 0.08);
-  transition: background 0.2s ease;
+  border-radius: var(--radius-md);
+  background: white;
+  border: 1px solid var(--color-border);
+  transition: all 0.15s ease;
 }
 
 .week-link:hover {
-  background: rgba(0, 122, 255, 0.15);
+  background: var(--color-bg);
+  border-color: var(--color-primary);
 }
 
 .week-link svg {
@@ -527,5 +529,149 @@ onMounted(() => {
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* =====================
+   PC Responsive (lg+)
+   ===================== */
+@media (min-width: 1024px) {
+  .today-page {
+    gap: 28px;
+    max-width: 1100px;
+  }
+
+  /* Header expands wider */
+  .date-header {
+    border-radius: var(--radius-xl);
+    padding: 36px 40px 32px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .date-header::before {
+    width: 260px;
+    height: 260px;
+    top: -80px;
+    right: -40px;
+  }
+
+  .date-header::after {
+    width: 160px;
+    height: 160px;
+    bottom: -60px;
+    right: 120px;
+  }
+
+  .date-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    z-index: 1;
+  }
+
+  .date-month-day {
+    font-size: 52px;
+  }
+
+  .date-weekday {
+    font-size: 20px;
+  }
+
+  .date-semester {
+    font-size: 15px;
+    z-index: 1;
+  }
+
+  /* Summary card — large horizontal dashboard card */
+  .summary-card {
+    padding: 24px 32px;
+    border-radius: var(--radius-xl);
+  }
+
+  .summary-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: var(--radius-lg);
+  }
+
+  .summary-icon svg {
+    width: 26px;
+    height: 26px;
+  }
+
+  .summary-count {
+    font-size: 44px;
+  }
+
+  .summary-label {
+    font-size: 14px;
+    margin-top: 4px;
+  }
+
+  .summary-tip {
+    font-size: 15px;
+  }
+
+  /* Courses — 2-column grid on PC */
+  .courses-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  .course-card {
+    padding: 20px;
+    border-radius: var(--radius-xl);
+    border-left-width: 5px;
+  }
+
+  .course-time-col {
+    min-width: 52px;
+  }
+
+  .time-start, .time-end {
+    font-size: 15px;
+  }
+
+  .course-name {
+    font-size: 17px;
+  }
+
+  .meta-item {
+    font-size: 14px;
+  }
+
+  .meta-item svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .period-badge {
+    font-size: 32px;
+    top: 16px;
+    right: 18px;
+  }
+
+  .scope-tag {
+    font-size: 12px;
+    padding: 3px 10px;
+  }
+
+  .week-link {
+    padding: 12px 24px;
+    font-size: 15px;
+    border-radius: var(--radius-lg);
+  }
+
+  .week-link svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Skeleton also 2-col */
+  .courses-list:has(.course-card-skeleton) {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>
