@@ -6,12 +6,9 @@ require (
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/alicebob/miniredis/v2 v2.33.0
 	github.com/gin-gonic/gin v1.9.1
-	github.com/go-resty/resty/v2 v2.7.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/joho/godotenv v1.5.1
 	github.com/redis/go-redis/v9 v9.5.1
-	gorm.io/driver/mysql v1.5.6
-	gorm.io/gorm v1.25.10
 )
 
 require (
@@ -26,11 +23,8 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.14.0 // indirect
-	github.com/go-sql-driver/mysql v1.7.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
-	github.com/jinzhu/inflection v1.0.0 // indirect
-	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.4 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect

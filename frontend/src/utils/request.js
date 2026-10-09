@@ -89,10 +89,8 @@ request.interceptors.response.use(
     }
 
     if (res.status === 0) {
-      if (res.code !== 'TOKEN_EXPIRED') {
-        ElMessage.error(res.info || res.message || '请求失败')
-      }
-      return Promise.reject(new Error(res.info || res.message))
+      ElMessage.error(res.info || '请求失败')
+      return Promise.reject(new Error(res.info))
     }
 
     return res
@@ -133,14 +131,10 @@ request.interceptors.response.use(
       }
     }
 
-    const code = error.response?.data?.code
-    const serverMessage = error.response?.data?.info || error.response?.data?.message
-    if (error.response?.status === 400) {
-      if (code !== 'TOKEN_EXPIRED') {
-        ElMessage.error(serverMessage || '请求失败')
-      }
-    } else if (error.response?.status !== 401) {
-      ElMessage.error(error.message || '网络错误')
+    // 后端统一返回 {status: 0, info}，info 可直接展示
+    const serverMessage = error.response?.data?.info
+    if (error.response?.status !== 401 && !axios.isCancel(error)) {
+      ElMessage.error(serverMessage || (error.response ? '请求失败' : '网络错误，请检查网络连接'))
     }
 
     return Promise.reject(error)

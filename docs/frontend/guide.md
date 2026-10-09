@@ -14,29 +14,21 @@ npm run dev
 
 ```
 frontend/src/
-├── main.js              # Vue 入口
-├── App.vue              # 根组件
-├── style.css            # 全局样式
-├── router/
-│   └── index.js         # 路由配置
-├── stores/
-│   ├── user.js          # 用户状态（token、uid）
-│   ├── schedule.js      # 课表状态（含冲突数据）
-│   └── theme.js         # 主题状态
+├── main.js / App.vue / style.css
+├── router/index.js
+├── layout/MainLayout.vue        # 主布局（侧栏 / 底部导航）
+├── stores/                      # user（token、uid）、schedule、theme
+├── composables/courseColors.js  # 按课程名分配颜色
 ├── utils/
-│   ├── request.js       # Axios 封装（请求拦截、Token 自动携带）
-│   ├── periods.js       # 课节时间配置
-│   ├── notifications.js # 浏览器通知
-│   ├── ical.js          # 日历导出
-│   └── notes.js         # 备注工具
-├── views/
-│   ├── Login.vue        # 登录页
-│   ├── Schedule.vue     # 课表页（含冲突检测警告）
-│   ├── Score.vue        # 成绩页（含 Canvas GPA 趋势图）
-│   ├── Today.vue        # 今日课表
-│   └── Profile.vue      # 个人中心（iCal 订阅、Webhook 管理）
-└── layout/
-    └── MainLayout.vue   # 主布局（顶部 + 底部导航）
+│   ├── request.js               # Axios 封装：自动带 token、刷新 token、统一错误提示、JW_SESSION_EXPIRED 跳登录
+│   ├── schedule.js              # 星期/节次常量、冲突映射、课表变动提示
+│   ├── periods.js / time.js / notes.js / ical.js / notifications.js
+├── components/
+│   ├── schedule/                # 课表页：ScheduleHeader、ScheduleGrid（桌面）、ScheduleDayList（手机）、
+│   │                            #   CourseDetail、CourseNoteDialog、ICalSubscribeDialog
+│   └── profile/                 # 「我的」页：各设置分组（*Section.vue）与 SettingsSection/SettingsItem/ActionItem
+├── styles/settings.css          # 「我的」页设置分组公共样式
+└── views/                       # Login、Schedule、Today、Score、Profile（页面只负责布局和组装）
 ```
 
 ## 页面说明

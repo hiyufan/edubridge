@@ -3,235 +3,39 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../stores/user'
-import { useThemeStore } from '../stores/theme'
-import { getNotifyPermission, requestNotifyPermission } from '../utils/notifications'
 import request from '../utils/request'
+import '../styles/settings.css'
+import ProfileHeader from '../components/profile/ProfileHeader.vue'
+import AccountSection from '../components/profile/AccountSection.vue'
+import AppearanceSection from '../components/profile/AppearanceSection.vue'
+import BrowserNotifySection from '../components/profile/BrowserNotifySection.vue'
+import MonitorSection from '../components/profile/MonitorSection.vue'
+import ReminderSection from '../components/profile/ReminderSection.vue'
+import NotifyChannelsSection from '../components/profile/NotifyChannelsSection.vue'
+import ICalSection from '../components/profile/ICalSection.vue'
+import WebhookSection from '../components/profile/WebhookSection.vue'
+import AboutSection from '../components/profile/AboutSection.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
-const themeStore = useThemeStore()
 
 const studentName = ref('')
 const className = ref('')
-const notifyPermission = ref('default')
-
-// 功能 07: iCal 订阅信息
-const iCalTokenInfo = ref(null)
-
-// 课表变动通知渠道（可同时开启多个）
-const emailAvailable = ref(false)
-const channelForm = ref({
-  pushplusOn: false, pushplusToken: '',
-  emailOn: false, emailTo: '',
-  botOn: false, botType: 'wecom', botUrl: '', botSecret: ''
-})
-const botTypes = [
-  { value: 'wecom', label: '企业微信', placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...' },
-  { value: 'dingtalk', label: '钉钉', placeholder: 'https://oapi.dingtalk.com/robot/send?access_token=...' },
-  { value: 'feishu', label: '飞书', placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/...' }
-]
-const channelNames = { webhook: 'Webhook', pushplus: '微信', email: '邮箱', bot: '群机器人' }
-const savingChannels = ref(false)
-const testingNotify = ref(false)
-
-const loadChannels = async () => {
-  const res = await request.get('/notify/channels')
-  const c = res.data?.channels || {}
-  emailAvailable.value = !!res.data?.emailAvailable
-  channelForm.value = {
-    pushplusOn: !!c.pushplus, pushplusToken: c.pushplus?.token || '',
-    emailOn: !!c.email, emailTo: c.email?.to || '',
-    botOn: !!c.bot, botType: c.bot?.type || 'wecom', botUrl: c.bot?.url || '', botSecret: c.bot?.secret || ''
-  }
-}
-
-const saveChannels = async () => {
-  const f = channelForm.value
-  savingChannels.value = true
-  try {
-    await request.put('/notify/channels', {
-      pushplus: f.pushplusOn ? { token: f.pushplusToken } : null,
-      email: f.emailOn ? { to: f.emailTo } : null,
-      bot: f.botOn ? { type: f.botType, url: f.botUrl, secret: f.botType === 'wecom' ? '' : f.botSecret } : null
-    })
-    ElMessage.success('通知设置已保存')
-  } catch {
-  } finally {
-    savingChannels.value = false
-  }
-}
-
-// 课表监控状态与最近动态
-const monitorStatus = ref(null)
-const expandedHistory = ref(new Set())
-const eventLabels = {
-  'schedule-diff': { label: '课表变动', color: '#007AFF' },
-  'score-new': { label: '新成绩', color: '#34C759' },
-  'session-expired': { label: '需重新登录', color: '#FF3B30' }
-}
-
-const loadMonitorStatus = async () => {
-  const res = await request.get('/monitor/status')
-  monitorStatus.value = res.data
-}
-
-const relativeTime = (iso) => {
-  if (!iso) return '尚未进行'
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-const toggleHistory = (idx) => {
-  const next = new Set(expandedHistory.value)
-  next.has(idx) ? next.delete(idx) : next.add(idx)
-  expandedHistory.value = next
-}
-
-const reloginNow = () => {
-  userStore.logout()
-  router.push('/login')
-}
-
-// 上课提醒
-const reminder = ref({ daily: false, dailyTime: '07:00', dailyTomorrow: false, beforeClass: false, beforeMinutes: 15 })
-const savingReminder = ref(false)
-const beforeOptions = [5, 10, 15, 20, 30, 60]
-
-const loadReminder = async () => {
-  const res = await request.get('/notify/reminder')
-  if (res.data) reminder.value = { ...reminder.value, ...res.data }
-}
-
-const saveReminder = async () => {
-  savingReminder.value = true
-  try {
-    await request.put('/notify/reminder', reminder.value)
-    ElMessage.success('提醒设置已保存')
-  } catch {
-  } finally {
-    savingReminder.value = false
-  }
-}
-
-// 功能 09: Webhook 配置
-const webhookUrl = ref('')
-const webhookSecret = ref('')
-const webhookInfo = ref(null)
 
 onMounted(async () => {
   try {
     const res = await request.get('/auth/me')
-    if (res.data?.name) studentName.value = res.data.name
-    if (res.data?.className) className.value = res.data.className
-    if (studentName.value) {
-      userStore.setUser({ ...userStore, name: studentName.value, className: className.value })
-    }
-  } catch (e) {
-    // 忽略，Profile 降级显示 uid
+    studentName.value = res.data?.name || ''
+    className.value = res.data?.className || ''
+  } catch {
+    // 忽略，降级显示学号
   }
-  notifyPermission.value = getNotifyPermission()
-
-  // 功能 07: 获取 iCal 订阅信息
-  try {
-    const icalRes = await request.get('/schedule/ical/token-info')
-    iCalTokenInfo.value = icalRes.data
-  } catch {}
-
-  try {
-    await loadChannels()
-  } catch {}
-  try {
-    await loadMonitorStatus()
-  } catch {}
-  try {
-    await loadReminder()
-  } catch {}
-
-  // 功能 09: 获取 Webhook 信息
-  try {
-    const whRes = await request.get('/webhook/info')
-    webhookInfo.value = whRes.data
-    webhookUrl.value = whRes.data?.url || ''
-    webhookSecret.value = whRes.data?.secret || ''
-  } catch {}
 })
 
-// 功能 07: 重新生成 iCal token
-const regenerateICalToken = async () => {
-  try {
-    const res = await request.post('/schedule/ical/token')
-    iCalTokenInfo.value = res.data
-    ElMessage.success('订阅链接已重新生成')
-  } catch {
-    ElMessage.error('生成失败')
-  }
-}
-
-// 向所有已开启的渠道发送测试通知，并逐个显示结果
-const testNotify = async () => {
-  testingNotify.value = true
-  try {
-    const res = await request.post('/notify/test')
-    const results = res.data?.results || []
-    const failed = results.filter(r => r.error)
-    if (failed.length === 0) {
-      ElMessage.success(`测试通知已发送（${results.map(r => channelNames[r.channel] || r.channel).join('、')}）`)
-    } else {
-      ElMessage({
-        type: 'warning',
-        duration: 8000,
-        message: failed.map(r => `${channelNames[r.channel] || r.channel}发送失败：${r.error}`).join('；')
-      })
-    }
-  } catch {
-  } finally {
-    testingNotify.value = false
-  }
-}
-
-// 功能 09: 保存 Webhook
-const saveWebhook = async () => {
-  if (!webhookUrl.value) {
-    ElMessage.warning('请输入 Webhook URL')
-    return
-  }
-  try {
-    await request.post('/webhook/register', {
-      url: webhookUrl.value,
-      secret: webhookSecret.value
-    })
-    ElMessage.success('Webhook 配置已保存')
-    // 重新获取
-    const whRes = await request.get('/webhook/info')
-    webhookInfo.value = whRes.data
-  } catch {
-    ElMessage.error('保存失败')
-  }
-}
-
-const handleNotify = async () => {
-  if (notifyPermission.value === 'granted') {
-    ElMessage.info('已开启课程提醒')
-    return
-  }
-  if (notifyPermission.value === 'denied') {
-    ElMessage.warning('通知已被浏览器拒绝，请在设置中开启')
-    return
-  }
-  const result = await requestNotifyPermission()
-  notifyPermission.value = result
-  if (result === 'granted') {
-    ElMessage.success('已开启课程提醒')
-  }
-}
-
+// 退出：通知后端作废登录凭证、停止后台监控，再清理本地状态
 const handleLogout = async () => {
   try {
-    await ElMessageBox.confirm('确定要退出登录吗？退出后将返回登录页面。', '退出登录', {
+    await ElMessageBox.confirm('确定要退出登录吗？退出后将不再推送课表变动和上课提醒。', '退出登录', {
       confirmButtonText: '退出',
       cancelButtonText: '取消',
       confirmButtonClass: 'logout-confirm-btn',
@@ -239,785 +43,80 @@ const handleLogout = async () => {
       type: 'warning',
       customClass: 'apple-message-box'
     })
-    userStore.logout()
-    ElMessage.success({
-      message: '已安全退出',
-      duration: 1500
-    })
-    setTimeout(() => {
-      router.push('/login')
-    }, 500)
   } catch {
-    // 用户取消
+    return // 用户取消
   }
-}
-
-// 获取用户头像首字母
-const getAvatarLetter = () => {
-  return (userStore.uid || 'U').charAt(0).toUpperCase()
+  try {
+    await request.post('/auth/logout')
+  } catch {
+    // 后端失败也继续退出本地登录
+  }
+  userStore.logout()
+  ElMessage.success({ message: '已安全退出', duration: 1500 })
+  setTimeout(() => router.push('/login'), 500)
 }
 </script>
 
 <template>
   <div class="profile-page">
-    <!-- Profile Header Card -->
-    <div class="profile-card animate-warm-fade-in">
-      <div class="profile-avatar">
-        <span class="avatar-letter">{{ getAvatarLetter() }}</span>
-        <div class="avatar-ring"></div>
+    <aside class="profile-side">
+      <ProfileHeader :uid="userStore.uid" :student-name="studentName" :class-name="className" />
+      <div class="logout-section animate-warm-fade-in stagger-4">
+        <button class="apple-btn logout-btn" @click="handleLogout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="logout-icon">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+          退出登录
+        </button>
       </div>
-      <div class="profile-info">
-        <h2 class="profile-name">{{ studentName || userStore.uid || '用户' }}</h2>
-        <p class="profile-role">{{ className || '学生' }}</p>
-      </div>
-      <div class="profile-status">
-        <span class="status-dot"></span>
-        <span class="status-text">已登录</span>
-      </div>
-    </div>
+      <div class="version-info animate-warm-fade-in stagger-3">教务系统 v1.0.0</div>
+    </aside>
 
-    <!-- Settings Groups -->
-    <div class="settings-section animate-warm-fade-in stagger-1">
-      <div class="apple-section-header">账户信息</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">学号</span>
-            <span class="item-value">{{ userStore.uid || '-' }}</span>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">姓名</span>
-            <span class="item-value">{{ studentName || '-' }}</span>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">班级</span>
-            <span class="item-value">{{ className || '-' }}</span>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-              <polyline points="22,6 12,13 2,6"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">身份类型</span>
-            <span class="item-value">学生</span>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">登录状态</span>
-            <span class="item-value status-active">已认证</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Theme Settings -->
-    <div class="settings-section animate-warm-fade-in stagger-2">
-      <div class="apple-section-header">外观</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <circle cx="12" cy="12" r="5"/>
-              <line x1="12" y1="1" x2="12" y2="3"/>
-              <line x1="12" y1="21" x2="12" y2="23"/>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-              <line x1="1" y1="12" x2="3" y2="12"/>
-              <line x1="21" y1="12" x2="23" y2="12"/>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-            </svg>
-          </div>
-          <div class="item-content" style="flex-direction:row;align-items:center;gap:8px;">
-            <span class="item-label">主题模式</span>
-            <div class="theme-modes">
-              <button
-                v-for="m in [{v:'light',l:'浅'},{v:'dark',l:'深'},{v:'auto',l:'自动'}]"
-                :key="m.v"
-                class="theme-mode-btn"
-                :class="{ active: themeStore.mode === m.v }"
-                @click="themeStore.setMode(m.v)"
-              >{{ m.l }}</button>
-            </div>
-          </div>
-        </div>
-        <div class="apple-grouped-item" style="flex-wrap:wrap;gap:8px;">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <circle cx="13.5" cy="6.5" r="3.5"/>
-              <circle cx="17.5" cy="10.5" r="2.5"/>
-              <circle cx="8.5" cy="7.5" r="4.5"/>
-              <circle cx="6.5" cy="12.5" r="5"/>
-            </svg>
-          </div>
-          <div class="item-content" style="flex-direction:row;align-items:center;gap:6px;flex:1;">
-            <span class="item-label">主题色</span>
-            <div class="color-swatches">
-              <button
-                v-for="c in themeStore.PRESET_COLORS"
-                :key="c.value"
-                class="color-swatch"
-                :style="{ background: c.value }"
-                :class="{ active: themeStore.primaryColor === c.value }"
-                @click="themeStore.setPrimaryColor(c.value)"
-              ></button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Notification Settings -->
-    <div class="settings-section animate-warm-fade-in stagger-2">
-      <div class="apple-section-header">通知</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item item-clickable" @click="handleNotify">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">课程提醒</span>
-            <span class="item-value">{{
-              notifyPermission === 'granted' ? '已开启' :
-              notifyPermission === 'denied' ? '已被拒绝' : '未开启'
-            }}</span>
-          </div>
-          <div class="item-arrow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 课表监控 -->
-    <div class="settings-section animate-warm-fade-in stagger-2" v-if="monitorStatus">
-      <div class="apple-section-header">课表监控</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item" :class="{ 'item-clickable': !monitorStatus.monitoring }" @click="!monitorStatus.monitoring && reloginNow()">
-          <div class="item-content channel-row">
-            <div class="channel-head">
-              <span class="item-label">监控状态</span>
-              <span class="item-value" :style="{ color: monitorStatus.monitoring ? '#34C759' : '#FF3B30' }">
-                {{ monitorStatus.monitoring ? '运行中' : '已暂停，点此重新登录' }}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-content channel-row">
-            <div class="channel-head">
-              <span class="item-label">上次检查</span>
-              <span class="item-value" :style="{ color: monitorStatus.lastCheckError ? '#FF3B30' : '' }">
-                {{ relativeTime(monitorStatus.lastCheck) }}{{ monitorStatus.lastCheck ? (monitorStatus.lastCheckError ? ' ✗' : ' ✓') : '' }}
-              </span>
-            </div>
-            <span v-if="monitorStatus.lastCheckError" class="channel-hint">{{ monitorStatus.lastCheckError }}</span>
-            <span v-if="monitorStatus.checkMinutes" class="channel-hint">每 {{ monitorStatus.checkMinutes }} 分钟检查一次课表和成绩</span>
-          </div>
-        </div>
-        <div v-if="!monitorStatus.notifyChannel" class="apple-grouped-item">
-          <div class="item-content">
-            <span class="channel-hint" style="color:#FF9500;">还没有开启通知方式，有变动时只能在这里看到</span>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-content channel-row">
-            <span class="item-label">最近动态</span>
-            <span v-if="!monitorStatus.history?.length" class="channel-hint">暂无。课表或成绩有变化时会记录在这里</span>
-            <div
-              v-for="(h, idx) in monitorStatus.history"
-              :key="idx"
-              class="history-item"
-              @click="toggleHistory(idx)"
-            >
-              <div class="history-head">
-                <span class="history-tag" :style="{ color: eventLabels[h.event]?.color, borderColor: eventLabels[h.event]?.color }">
-                  {{ eventLabels[h.event]?.label || h.event }}
-                </span>
-                <span class="channel-hint">{{ relativeTime(h.time) }}</span>
-              </div>
-              <div class="history-text" :class="{ expanded: expandedHistory.has(idx) }">{{ h.text }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 上课提醒 -->
-    <div class="settings-section animate-warm-fade-in stagger-2">
-      <div class="apple-section-header">上课提醒</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item">
-          <div class="item-content channel-row">
-            <div class="channel-head">
-              <span class="item-label">每日课表</span>
-              <el-switch v-model="reminder.daily" size="small" />
-            </div>
-            <div v-if="reminder.daily" class="reminder-row">
-              <span class="channel-hint">每天</span>
-              <el-time-select v-model="reminder.dailyTime" start="05:00" step="00:30" end="23:30" size="small" :clearable="false" style="width:110px" />
-              <span class="channel-hint">推送</span>
-              <el-radio-group v-model="reminder.dailyTomorrow" size="small">
-                <el-radio-button :value="false">当天</el-radio-button>
-                <el-radio-button :value="true">明天</el-radio-button>
-              </el-radio-group>
-              <span class="channel-hint">的课</span>
-            </div>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-content channel-row">
-            <div class="channel-head">
-              <span class="item-label">课前提醒</span>
-              <el-switch v-model="reminder.beforeClass" size="small" />
-            </div>
-            <div v-if="reminder.beforeClass" class="reminder-row">
-              <span class="channel-hint">每节课开始前</span>
-              <el-select v-model="reminder.beforeMinutes" size="small" style="width:90px">
-                <el-option v-for="m in beforeOptions" :key="m" :label="`${m} 分钟`" :value="m" />
-              </el-select>
-            </div>
-          </div>
-        </div>
-        <div class="apple-grouped-item item-clickable" @click="!savingReminder && saveReminder()">
-          <div class="item-content">
-            <span class="item-label" style="color:#007AFF;">{{ savingReminder ? '保存中…' : '保存提醒设置' }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 通知方式 -->
-    <div class="settings-section animate-warm-fade-in stagger-2">
-      <div class="apple-section-header">通知方式</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item">
-          <div class="item-content channel-row">
-            <div class="channel-head">
-              <span class="item-label">微信（PushPlus）</span>
-              <el-switch v-model="channelForm.pushplusOn" size="small" />
-            </div>
-            <template v-if="channelForm.pushplusOn">
-              <el-input v-model="channelForm.pushplusToken" placeholder="PushPlus token" size="small" />
-              <span class="channel-hint">在 <a href="https://www.pushplus.plus" target="_blank" rel="noopener">pushplus.plus</a> 微信扫码登录后获取 token</span>
-            </template>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-content channel-row">
-            <div class="channel-head">
-              <span class="item-label">邮箱</span>
-              <el-switch v-model="channelForm.emailOn" size="small" :disabled="!emailAvailable && !channelForm.emailOn" />
-            </div>
-            <el-input v-if="channelForm.emailOn" v-model="channelForm.emailTo" placeholder="you@example.com" size="small" />
-            <span v-if="!emailAvailable" class="channel-hint">服务器未配置发信邮箱，暂不可用</span>
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-content channel-row">
-            <div class="channel-head">
-              <span class="item-label">群机器人</span>
-              <el-switch v-model="channelForm.botOn" size="small" />
-            </div>
-            <template v-if="channelForm.botOn">
-              <el-radio-group v-model="channelForm.botType" size="small">
-                <el-radio-button v-for="b in botTypes" :key="b.value" :value="b.value">{{ b.label }}</el-radio-button>
-              </el-radio-group>
-              <el-input v-model="channelForm.botUrl" :placeholder="botTypes.find(b => b.value === channelForm.botType).placeholder" size="small" />
-              <el-input v-if="channelForm.botType !== 'wecom'" v-model="channelForm.botSecret" placeholder="加签密钥（可选）" size="small" />
-              <span v-if="channelForm.botType === 'dingtalk'" class="channel-hint">钉钉机器人如设置了关键词，请包含「课表」</span>
-            </template>
-          </div>
-        </div>
-        <div class="apple-grouped-item item-clickable" @click="!savingChannels && saveChannels()">
-          <div class="item-content">
-            <span class="item-label" style="color:#007AFF;">{{ savingChannels ? '保存中…' : '保存通知设置' }}</span>
-          </div>
-        </div>
-        <div class="apple-grouped-item item-clickable" @click="!testingNotify && testNotify()">
-          <div class="item-content">
-            <span class="item-label" style="color:#007AFF;">{{ testingNotify ? '发送中…' : '发送测试通知' }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 功能 07: iCal 订阅信息 -->
-    <div class="settings-section animate-warm-fade-in stagger-2" v-if="iCalTokenInfo">
-      <div class="apple-section-header">日历订阅</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">订阅状态</span>
-            <span class="item-value">已激活 · 有效期至 {{ iCalTokenInfo.expireAt }}</span>
-          </div>
-        </div>
-        <div class="apple-grouped-item item-clickable" @click="regenerateICalToken">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <polyline points="23 4 23 10 17 10"/>
-              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">重新生成订阅链接</span>
-          </div>
-          <div class="item-arrow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 功能 09: Webhook 配置 -->
-    <div class="settings-section animate-warm-fade-in stagger-2">
-      <div class="apple-section-header">Webhook 推送</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-            </svg>
-          </div>
-          <div class="item-content" style="flex-direction:column;gap:8px;">
-            <span class="item-label">Webhook URL</span>
-            <el-input v-model="webhookUrl" placeholder="https://example.com/webhook" size="small" />
-          </div>
-        </div>
-        <div class="apple-grouped-item">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            </svg>
-          </div>
-          <div class="item-content" style="flex-direction:column;gap:8px;">
-            <span class="item-label">密钥（可选）</span>
-            <el-input v-model="webhookSecret" placeholder="签名密钥" size="small" />
-          </div>
-        </div>
-        <div class="apple-grouped-item item-clickable" @click="saveWebhook">
-          <div class="item-icon" style="background:rgba(0,122,255,0.1);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-              <polyline points="17 21 17 13 7 13 7 21"/>
-              <polyline points="7 3 7 8 15 8"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label" style="color:#007AFF;">保存 Webhook 配置</span>
-          </div>
-        </div>
-        <!-- Webhook 历史 -->
-        <template v-if="webhookInfo?.history?.length">
-          <div v-for="(h, idx) in webhookInfo.history.slice(0, 3)" :key="idx" class="webhook-history-item">
-            <span class="wh-time">{{ h.time }}</span>
-            <span class="wh-summary">{{ h.summary }}</span>
-            <span :class="['wh-status', h.success ? 'success' : 'fail']">
-              {{ h.success ? '成功' : '失败' }}
-            </span>
-          </div>
-        </template>
-      </div>
-    </div>
-
-    <!-- Security Settings -->
-    <div class="settings-section animate-warm-fade-in stagger-2">
-      <div class="apple-section-header">安全设置</div>
-      <div class="apple-grouped-list">
-        <div class="apple-grouped-item item-clickable">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">修改密码</span>
-          </div>
-          <div class="item-arrow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </div>
-        </div>
-        <div class="apple-grouped-item item-clickable">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">隐私政策</span>
-          </div>
-          <div class="item-arrow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </div>
-        </div>
-        <div class="apple-grouped-item item-clickable">
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="16" x2="12" y2="12"/>
-              <line x1="12" y1="8" x2="12.01" y2="8"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label">关于我们</span>
-          </div>
-          <div class="item-arrow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Version Info -->
-    <div class="version-info animate-warm-fade-in stagger-3">
-      <span>教务系统 v1.0.0</span>
-    </div>
-
-    <!-- Logout Button -->
-    <div class="logout-section animate-warm-fade-in stagger-4">
-      <button class="apple-btn logout-btn" @click="handleLogout">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" class="logout-icon">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-          <polyline points="16 17 21 12 16 7"/>
-          <line x1="21" y1="12" x2="9" y2="12"/>
-        </svg>
-        退出登录
-      </button>
-    </div>
+    <main class="profile-main">
+      <AccountSection :uid="userStore.uid" :student-name="studentName" :class-name="className" />
+      <AppearanceSection />
+      <BrowserNotifySection />
+      <MonitorSection />
+      <ReminderSection />
+      <NotifyChannelsSection />
+      <ICalSection />
+      <WebhookSection />
+      <AboutSection />
+    </main>
   </div>
 </template>
 
 <style scoped>
-.profile-page {
+.profile-page,
+.profile-side,
+.profile-main {
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-/* Profile Card */
-.profile-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background: white;
-  border-radius: var(--radius-lg);
-  padding: 32px 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
-  position: relative;
-  overflow: hidden;
-  border: 1px solid var(--color-border-light);
+/* 手机：版本号和退出按钮放在最底部 */
+.profile-side {
+  display: contents;
 }
 
-.profile-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 80px;
-  background: var(--color-primary);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-}
-
-.profile-avatar {
-  position: relative;
-  width: 88px;
-  height: 88px;
-  margin-top: 12px;
-  z-index: 1;
-}
-
-.avatar-letter {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-primary);
-  border-radius: 50%;
-  font-size: 36px;
-  font-weight: 600;
-  color: white;
-  letter-spacing: -0.02em;
-}
-
-.avatar-ring {
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 3px solid white;
-  box-shadow: 0 2px 8px rgba(120, 113, 108, 0.15);
-}
-
-.profile-info {
-  text-align: center;
-  margin-top: 16px;
-  z-index: 1;
-}
-
-.profile-name {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--color-text);
-  letter-spacing: -0.024em;
-}
-
-.profile-role {
-  font-size: 14px;
-  color: var(--color-text-muted);
-  margin-top: 4px;
-  font-weight: 500;
-}
-
-.profile-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
-  padding: 6px 14px;
-  background: rgba(120, 113, 108, 0.08);
-  border-radius: 20px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  background: #A16207;
-  border-radius: 50%;
-  animation: statusPulse 2s ease-in-out infinite;
-}
-
-@keyframes statusPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.status-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: #A16207;
-}
-
-/* Settings Section */
-.channel-row {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  width: 100%;
-}
-
-.channel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.channel-hint {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.reminder-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.history-item {
+.logout-section {
+  order: 3;
   padding: 8px 0;
-  border-top: 1px solid var(--el-border-color-lighter);
-  cursor: pointer;
 }
 
-.history-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
-}
-
-.history-tag {
-  font-size: 11px;
-  padding: 1px 6px;
-  border: 1px solid;
-  border-radius: 4px;
-}
-
-.history-text {
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.history-text.expanded {
-  display: block;
-}
-
-.channel-hint a {
-  color: #007AFF;
-}
-
-.settings-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.apple-grouped-list {
-  background: white;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  border: 1px solid var(--color-border-light);
-}
-
-.apple-grouped-item {
-  display: flex;
-  align-items: center;
-  padding: 14px 16px;
-  background: white;
-  border-bottom: 0.5px solid var(--color-border);
-}
-
-.apple-grouped-item:last-child {
-  border-bottom: none;
-}
-
-.item-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-right: 12px;
-  background: var(--color-bg);
-  border-radius: var(--radius-md);
-}
-
-.item-icon svg {
-  width: 18px;
-  height: 18px;
-  color: var(--color-primary);
-}
-
-.item-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.item-label {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--color-text);
-}
-
-.item-value {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  margin-top: 2px;
-}
-
-.item-value.status-active {
-  color: #A16207;
-  font-weight: 600;
-}
-
-.item-arrow {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-}
-
-.item-arrow svg {
-  width: 16px;
-  height: 16px;
-  color: var(--color-border);
-}
-
-.item-clickable {
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-
-.item-clickable:hover {
-  background: var(--color-bg);
-}
-
-/* Version Info */
 .version-info {
+  order: 2;
   text-align: center;
   font-size: 12px;
   color: var(--color-text-muted);
   padding: 8px;
 }
 
-/* Logout Button */
-.logout-section {
-  padding: 8px 0;
+.profile-main {
+  order: 1;
 }
 
 .logout-btn {
@@ -1040,186 +139,23 @@ const getAvatarLetter = () => {
   margin-right: 8px;
 }
 
-/* Theme Mode Buttons */
-.theme-modes {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.theme-mode-btn {
-  padding: 4px 12px;
-  border: 1.5px solid var(--color-border);
-  border-radius: 20px;
-  background: white;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.theme-mode-btn.active {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: white;
-  font-weight: 600;
-}
-
-.theme-mode-btn:hover:not(.active) {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-
-/* Color Swatches */
-.color-swatches {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-left: auto;
-}
-
-.color-swatch {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
-}
-
-.color-swatch.active {
-  border-color: white;
-  box-shadow: 0 0 0 2px currentColor, 0 2px 6px rgba(0,0,0,0.2);
-  transform: scale(1.15);
-}
-
-.color-swatch:hover:not(.active) {
-  transform: scale(1.1);
-}
-
-/* 功能 09: Webhook 历史 */
-.webhook-history-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  font-size: 12px;
-  border-top: 0.5px solid rgba(0,0,0,0.06);
-}
-
-.wh-time {
-  color: #8e8e93;
-  flex-shrink: 0;
-}
-
-.wh-summary {
-  flex: 1;
-  color: #636366;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wh-status {
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.wh-status.success { color: #A16207; }
-.wh-status.fail { color: #DC2626; }
-
-/* =====================
-   PC Responsive (lg+)
-   ===================== */
+/* 桌面：左侧个人信息，右侧设置 */
 @media (min-width: 1024px) {
   .profile-page {
     display: grid;
     grid-template-columns: 380px 1fr;
-    grid-template-rows: auto auto auto;
     gap: 24px;
     max-width: 1100px;
     align-items: start;
   }
 
-  /* Header spans full width on left column */
-  .profile-card {
-    grid-column: 1;
-    grid-row: 1;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    padding: 36px 28px 28px;
-    border-radius: var(--radius-xl);
-  }
-
-  .profile-info {
-    margin-top: 16px;
-  }
-
-  .profile-name {
-    font-size: 26px;
-  }
-
-  /* Settings sections stack in right column */
-  .settings-section {
-    grid-column: 2;
-    grid-row: 1 / span 3;
-    align-items: flex-start;
-  }
-
-  .settings-section:nth-child(2) {
-    grid-row: 1;
-  }
-
-  .apple-grouped-list {
-    border-radius: var(--radius-xl);
-  }
-
-  .apple-grouped-item {
-    padding: 16px 20px;
-  }
-
-  .apple-section-header {
-    font-size: 12px;
-    padding: 0 4px 8px;
-    letter-spacing: 0.08em;
-  }
-
-  .item-icon {
-    width: 36px;
-    height: 36px;
-    margin-right: 16px;
-  }
-
-  .item-icon svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  .item-label {
-    font-size: 15px;
-  }
-
-  .item-value {
-    font-size: 14px;
-  }
-
-  .theme-mode-btn {
-    padding: 5px 16px;
-    font-size: 13px;
-    border-radius: 20px;
-  }
-
-  .color-swatch {
-    width: 28px;
-    height: 28px;
+  .profile-side {
+    display: flex;
+    position: sticky;
+    top: 24px;
   }
 
   .logout-section {
-    grid-column: 1;
-    grid-row: 2;
     padding: 0;
   }
 
@@ -1230,15 +166,13 @@ const getAvatarLetter = () => {
   }
 
   .version-info {
-    grid-column: 1;
-    grid-row: 3;
-    padding: 8px 0 0;
+    padding: 0;
   }
 }
 </style>
 
 <style>
-/* Global overrides for Element Plus MessageBox */
+/* Element Plus MessageBox 全局覆盖 */
 .apple-message-box .el-message-box__headerbtn .el-message-box__close {
   color: var(--color-text-muted);
 }
@@ -1254,11 +188,7 @@ const getAvatarLetter = () => {
   color: var(--color-text-muted);
 }
 
-.apple-message-box .el-button--primary {
-  background: #DC2626 !important;
-  border-color: #DC2626 !important;
-}
-
+.apple-message-box .el-button--primary,
 .apple-message-box .logout-confirm-btn {
   background: #DC2626 !important;
   border-color: #DC2626 !important;

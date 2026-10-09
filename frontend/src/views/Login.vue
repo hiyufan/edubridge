@@ -30,8 +30,8 @@ const fetchCaptcha = async () => {
   try {
     const res = await request.get('/captcha')
     captchaUrl.value = res.data
-  } catch (error) {
-    ElMessage.error('获取验证码失败')
+  } catch {
+    // 错误提示由请求拦截器统一显示
   }
 }
 
@@ -68,7 +68,10 @@ const handleLogin = async () => {
 
     request.get('/schedule?week=1').catch(() => {})
     request.get('/score').catch(() => {})
-  } catch (error) {
+  } catch {
+    // 验证码只能用一次：失败后换一张新的
+    loginForm.value.captcha = ''
+    fetchCaptcha()
   } finally {
     loading.value = false
   }

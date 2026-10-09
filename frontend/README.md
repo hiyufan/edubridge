@@ -1,4 +1,4 @@
-# jww.p 前端
+# EduBridge 前端
 
 Vue 3 + Vite 构建的教务系统中间件管理后台。
 
