@@ -79,6 +79,9 @@ type JwService struct {
 	mu            sync.RWMutex
 	scheduleCache map[string]*ScheduleCache // key 为学号
 	snapMu        sync.Mutex
+	// 后台监控间隔（StartMonitor 设置，用于展示）
+	keepaliveInterval time.Duration
+	checkInterval     time.Duration
 	stopCh        chan struct{}
 }
 
@@ -887,10 +890,15 @@ func (s *JwService) GetScorePage(sessionID, semester string) ([]model.Score, err
 
 	// 循环分页拿完全部成绩
 	// 教务系统忽略 rows 参数，硬编码每页最多 9 条，必须循环分页
-	allScores, err := s.fetchAllScores(session)
+	allScores, complete, err := s.fetchAllScores(session)
 	if err != nil {
+		if errors.Is(err, ErrSessionExpired) {
+			s.expireUser(session.UID)
+		}
 		return nil, err
 	}
+	s.persistCookies(session)
+	s.recordScores(session.UID, allScores, complete)
 
 	slog.Info("成绩获取完成", "total_collected", len(allScores))
 
@@ -933,8 +941,8 @@ func buildScoreRequest(method, url string, body io.Reader, contentType string) (
 	return req, nil
 }
 
-// fetchAllScores 分页并发拉取全部成绩
-func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
+// fetchAllScores 分页并发拉取全部成绩；complete 表示所有分页都成功
+func (s *JwService) fetchAllScores(session *Session) (scores []model.Score, complete bool, err error) {
 	seen := sync.Map{}
 
 	// 第一页：获取总数
@@ -946,7 +954,7 @@ func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 	}
 	req, err := buildScoreRequest("GET", baseURL+"/studentportal.php/Jxxx/cjxxlb", nil, "")
 	if err != nil {
-		return nil, fmt.Errorf("构建成绩请求失败: %v", err)
+		return nil, false, fmt.Errorf("构建成绩请求失败: %v", err)
 	}
 	q := req.URL.Query()
 	for k, v := range queryParams { q.Add(k, v) }
@@ -954,17 +962,20 @@ func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 
 	resp, err := session.HttpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("获取成绩失败: %v", err)
+		return nil, false, fmt.Errorf("获取成绩失败: %v", err)
 	}
 	bodyBytes, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
-		return nil, fmt.Errorf("读取成绩响应失败: %v", err)
+		return nil, false, fmt.Errorf("读取成绩响应失败: %v", err)
 	}
 
 	var firstResp scorePageResp
 	if err := json.Unmarshal(bodyBytes, &firstResp); err != nil {
-		return nil, fmt.Errorf("解析成绩失败: %v", err)
+		if isLoginPage(resp.Request.URL.String(), string(bodyBytes)) {
+			return nil, false, ErrSessionExpired
+		}
+		return nil, false, fmt.Errorf("解析成绩失败: %v", err)
 	}
 
 	totalRows := 0
@@ -973,7 +984,7 @@ func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 	}
 	// totalRows 为 0 或 total 为空字符串（教务系统无成绩）时，直接解析第一页后返回
 	if totalRows <= 0 {
-		return parseScoreRows(firstResp.Rows, &seen), nil
+		return parseScoreRows(firstResp.Rows, &seen), true, nil
 	}
 	totalPages := (totalRows + pageSize - 1) / pageSize
 
@@ -1057,10 +1068,16 @@ func (s *JwService) fetchAllScores(session *Session) ([]model.Score, error) {
 		}
 		allScores = append(allScores, parseScoreRows(resp.Rows, &seen)...)
 	}
-	if len(allScores) < totalRows {
+	complete = true
+	for _, f := range failed {
+		if f {
+			complete = false
+		}
+	}
+	if !complete {
 		slog.Warn("成绩分页不完整，部分页抓取失败", "collected", len(allScores), "expected", totalRows)
 	}
-	return allScores, nil
+	return allScores, complete, nil
 }
 
 func parseScoreRows(rows []struct {

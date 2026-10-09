@@ -10,13 +10,16 @@ import (
 
 // 后台课表监控：
 //   - 每个 keepalive 周期访问一次教务系统，让学校那边的登录会话不过期（这样用户不用反复输验证码）；
-//   - 距上次完整检查超过 check 周期时，拉取完整课表并与快照比对，有加课/减课就推送通知；
+//   - 距上次完整检查超过 check 周期时，拉取完整课表和成绩并与上次比对，有加课/减课、新成绩就推送通知；
 //   - 发现教务登录已失效时停止监控该用户，并通知其重新登录。
 
 const monitorMaxWeek = 20
 
 // StartMonitor 启动后台监控（随 Close 停止）
 func (s *JwService) StartMonitor(keepalive, check time.Duration) {
+	s.mu.Lock()
+	s.keepaliveInterval, s.checkInterval = keepalive, check
+	s.mu.Unlock()
 	go func() {
 		lastCheck := make(map[string]time.Time)
 		timer := time.NewTimer(30 * time.Second) // 启动后稍等再跑第一轮
@@ -64,14 +67,26 @@ func (s *JwService) monitorRound(lastCheck map[string]time.Time, check time.Dura
 	}
 }
 
-// checkUser 完整检查一次课表，返回是否成功
+// MonitorIntervals 返回保活与完整检查的间隔（未启动监控时为 0）
+func (s *JwService) MonitorIntervals() (keepalive, check time.Duration) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.keepaliveInterval, s.checkInterval
+}
+
+// checkUser 完整检查一次课表和成绩，返回是否成功
 func (s *JwService) checkUser(uid string) bool {
 	session, err := s.userSession(uid)
 	if err != nil {
 		s.handleMonitorErr(uid, err)
 		return false
 	}
-	if _, err := s.refreshSchedule(session, monitorMaxWeek); err != nil {
+	_, err = s.refreshSchedule(session, monitorMaxWeek)
+	if err == nil {
+		err = s.checkScores(session)
+	}
+	recordMonitorResult(uid, "lastCheck", err)
+	if err != nil {
 		s.handleMonitorErr(uid, err)
 		return false
 	}
@@ -85,7 +100,9 @@ func (s *JwService) keepaliveUser(uid string) {
 		s.handleMonitorErr(uid, err)
 		return
 	}
-	if err := s.ping(session); err != nil {
+	err = s.ping(session)
+	recordMonitorResult(uid, "lastKeepalive", err)
+	if err != nil {
 		if errors.Is(err, ErrSessionExpired) {
 			s.expireUser(uid)
 		}

@@ -24,6 +24,9 @@ type fakeJw struct {
 	start    time.Time // 第 1 周周一
 	// week -> 该周的课（DayOfWeek/PeriodStart/Periods/Name/Teacher/Room）
 	courses func(week int) []model.Course
+	// 成绩接口返回的行（字段同教务系统 JSON），nil 表示没有成绩
+	scores   []map[string]interface{}
+	failPage int // 成绩第几页返回错误（0 表示不出错）
 }
 
 var reDQZ = regexp.MustCompile(`/dqz/(\d+)/`)
@@ -45,6 +48,27 @@ func (f *fakeJw) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "<html>欢迎</html>")
 	case r.URL.Path == "/studentportal.php/Jxxx/xskbxx/optype/1":
 		fmt.Fprint(w, `<html><a href="/studentportal.php/Jxxx/xskbxx/optype/2/xn/2026-2027/xq/1/dqz/1/sybmdmstr/X/bjmc/软件1班">课表</a></html>`)
+	case r.URL.Path == "/studentportal.php/Jxxx/cjxxlb":
+		r.ParseForm()
+		page, _ := strconv.Atoi(r.Form.Get("page"))
+		f.mu.Lock()
+		rows, failPage := f.scores, f.failPage
+		f.mu.Unlock()
+		if page == failPage {
+			http.Error(w, "boom", http.StatusBadGateway)
+			return
+		}
+		start, end := (page-1)*9, page*9
+		if start > len(rows) {
+			start = len(rows)
+		}
+		if end > len(rows) {
+			end = len(rows)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"total": strconv.Itoa(len(rows)),
+			"rows":  rows[start:end],
+		})
 	case strings.HasPrefix(r.URL.Path, "/studentportal.php/Jxxx/xskbxx/optype/2/"):
 		m := reDQZ.FindStringSubmatch(r.URL.Path)
 		week, _ := strconv.Atoi(m[1])
@@ -233,6 +257,16 @@ func TestMonitorDetectsChangesAndExpiry(t *testing.T) {
 	// 再次检测不会重复通知
 	svc.keepaliveUser(uid)
 	hook.none(t)
+
+	// 监控状态与动态历史
+	status, err := GetMonitorStatus(uid)
+	if err != nil || status.LastCheck == nil || status.LastCheckError != "" || status.LastKeepalive == nil {
+		t.Fatalf("status = %+v, %v", status, err)
+	}
+	history, err := GetHistory(uid, 10)
+	if err != nil || len(history) != 2 || history[0].Event != EventSessionExpired || history[1].Event != EventScheduleDiff {
+		t.Fatalf("history = %+v, %v", history, err)
+	}
 }
 
 func TestIncompleteFetchDoesNotNotify(t *testing.T) {

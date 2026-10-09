@@ -98,3 +98,15 @@ func TestWebhookInfoIsScopedToUser(t *testing.T) {
 		t.Fatal("bob must not see alice's webhook")
 	}
 }
+
+func TestICalPeriodTimesMatchTimetable(t *testing.T) {
+	if got := getPeriodStartTime(3); got != "100000" {
+		t.Errorf("start(3) = %s", got)
+	}
+	if got := getPeriodEndTime(1, 2); got != "094000" {
+		t.Errorf("end(1,2) = %s", got)
+	}
+	if got := getPeriodEndTime(9, 4); got != "220000" {
+		t.Errorf("end(9,4) = %s", got)
+	}
+}

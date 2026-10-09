@@ -18,6 +18,8 @@ import (
 const (
 	EventScheduleDiff   = "schedule-diff"   // 课表变动
 	EventSessionExpired = "session-expired" // 教务登录失效，需要重新登录
+	EventScoreNew       = "score-new"       // 新出成绩
+	EventReminder       = "reminder"        // 上课提醒
 	EventTest           = "test"            // 手动测试
 )
 
@@ -34,6 +36,9 @@ var notifyClient = &http.Client{Timeout: 10 * time.Second}
 // notifyUser 异步向用户开启的所有通知渠道推送
 func notifyUser(uid, event, text string, data interface{}) {
 	payload := &NotifyPayload{Event: event, Text: text, Data: data, Time: time.Now()}
+	if event != EventTest && event != EventReminder {
+		pushHistory(uid, &HistoryEntry{Event: event, Text: text, Time: payload.Time})
+	}
 	go func() {
 		if _, err := SendNotify(uid, payload); err != nil && !errors.Is(err, ErrNotFound) {
 			slog.Warn("Notify failed", "uid", uid, "event", event, "err", err)

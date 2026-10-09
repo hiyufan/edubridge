@@ -156,6 +156,8 @@ func main() {
 			protected.POST("/notify/test", notifyHandler.TestNotify)
 			protected.GET("/notify/channels", notifyHandler.GetChannels)
 			protected.PUT("/notify/channels", notifyHandler.SaveChannels)
+			protected.GET("/notify/reminder", notifyHandler.GetReminder)
+			protected.PUT("/notify/reminder", notifyHandler.SaveReminder)
 			protected.GET("/monitor/status", notifyHandler.MonitorStatus)
 
 			protected.GET("/schedule/ical", scheduleHandler.GetICal)
@@ -179,6 +181,7 @@ func main() {
 
 	service.ConfigureEmail(service.SMTPConfig(cfg.SMTP))
 	service.GetJwService().StartMonitor(cfg.MonitorKeepalive, cfg.MonitorCheck)
+	service.GetJwService().StartReminders()
 
 	log.Printf("Server starting on http://localhost:%s", cfg.Port)
 

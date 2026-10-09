@@ -185,28 +185,22 @@ func getWeekdayICal(dayOfWeek int) string {
 	return "MO"
 }
 
+// getPeriodStartTime 节次开始时间（"080000"），作息表见 service.PeriodTimeRange
 func getPeriodStartTime(periodStart int) string {
-	// 前两节 8:00，后续每节 45 分钟
-	times := []string{"080000", "081500", "090000", "091500", "100000", "101500", "110000", "111500",
-		"140000", "141500", "150000", "151500", "160000", "161500", "170000", "171500",
-		"190000", "191500", "200000", "201500", "210000", "211500", "220000", "221500"}
-	idx := periodStart - 1
-	if idx < 0 {
-		idx = 0
+	start, _ := service.PeriodTimeRange(periodStart, 1)
+	if start == "" {
+		start = "08:00"
 	}
-	if idx >= len(times) {
-		idx = len(times) - 1
-	}
-	return times[idx]
+	return strings.ReplaceAll(start, ":", "") + "00"
 }
 
+// getPeriodEndTime 连续节次的结束时间（"094000"）
 func getPeriodEndTime(periodStart, periods int) string {
-	// 简单计算：每节课 45 分钟
-	startMinutes := (periodStart - 1) * 45
-	endMinutes := startMinutes + periods*45
-	hour := 8 + endMinutes/60
-	minute := endMinutes % 60
-	return fmt.Sprintf("%02d%02d00", hour, minute)
+	_, end := service.PeriodTimeRange(periodStart, periods)
+	if end == "" {
+		end = "08:45"
+	}
+	return strings.ReplaceAll(end, ":", "") + "00"
 }
 
 func escapeICalText(s string) string {

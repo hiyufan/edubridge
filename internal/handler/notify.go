@@ -84,6 +84,44 @@ func (h *NotifyHandler) SaveChannels(c *gin.Context) {
 	response.Success(c, gin.H{"channels": channels})
 }
 
+// GetReminder 获取上课提醒设置
+func (h *NotifyHandler) GetReminder(c *gin.Context) {
+	uid, ok := getUID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "无效的会话")
+		return
+	}
+	settings, err := service.GetReminderSettings(uid)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "读取提醒设置失败")
+		return
+	}
+	response.Success(c, settings)
+}
+
+// SaveReminder 保存上课提醒设置
+func (h *NotifyHandler) SaveReminder(c *gin.Context) {
+	uid, ok := getUID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "无效的会话")
+		return
+	}
+	var settings service.ReminderSettings
+	if err := c.ShouldBindJSON(&settings); err != nil {
+		response.Error(c, http.StatusBadRequest, "参数格式不正确")
+		return
+	}
+	if err := settings.Validate(); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := service.SaveReminderSettings(uid, &settings); err != nil {
+		response.Error(c, http.StatusInternalServerError, "保存提醒设置失败")
+		return
+	}
+	response.Success(c, settings)
+}
+
 // MonitorStatus 课表监控状态及最近一次检测到的变动
 func (h *NotifyHandler) MonitorStatus(c *gin.Context) {
 	uid, ok := getUID(c)
@@ -104,9 +142,28 @@ func (h *NotifyHandler) MonitorStatus(c *gin.Context) {
 		return
 	}
 
+	status, err := service.GetMonitorStatus(uid)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "读取监控状态失败")
+		return
+	}
+	history, err := service.GetHistory(uid, 20)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "读取动态失败")
+		return
+	}
+	keepalive, check := service.GetJwService().MonitorIntervals()
+
 	result := gin.H{
-		"monitoring":    monitored,
-		"notifyChannel": webhookErr == nil || channels.Any(),
+		"monitoring":         monitored,
+		"notifyChannel":      webhookErr == nil || channels.Any(),
+		"lastCheck":          status.LastCheck,
+		"lastCheckError":     status.LastCheckError,
+		"lastKeepalive":      status.LastKeepalive,
+		"lastKeepaliveError": status.LastKeepaliveError,
+		"keepaliveMinutes":   int(keepalive.Minutes()),
+		"checkMinutes":       int(check.Minutes()),
+		"history":            history,
 	}
 	if diff, err := service.GetLatestDiff(uid); err == nil {
 		result["lastDiff"] = diff

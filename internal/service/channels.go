@@ -146,6 +146,10 @@ func notifyTitle(event string) string {
 		return "课表变动提醒"
 	case EventSessionExpired:
 		return "教务登录已失效"
+	case EventScoreNew:
+		return "成绩发布提醒"
+	case EventReminder:
+		return "上课提醒"
 	case EventTest:
 		return "课表监控测试通知"
 	}

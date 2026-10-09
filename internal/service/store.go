@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -276,4 +278,99 @@ func GetLatestDiff(uid string) (*ScheduleDiff, error) {
 		return nil, err
 	}
 	return &diff, nil
+}
+
+// ---- 监控状态与动态历史 ----
+
+const (
+	monitorStatusPrefix = "monitor:status:" // uid -> hash
+	historyPrefix       = "notify:history:" // uid -> list of HistoryEntry JSON（新的在前）
+	historyMax          = 30
+)
+
+// MonitorStatus 用户的后台监控运行情况
+type MonitorStatus struct {
+	LastCheck          *time.Time `json:"lastCheck"`
+	LastCheckError     string     `json:"lastCheckError,omitempty"`
+	LastKeepalive      *time.Time `json:"lastKeepalive"`
+	LastKeepaliveError string     `json:"lastKeepaliveError,omitempty"`
+}
+
+func recordMonitorResult(uid, kind string, err error) {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	ctx, cancel := storeCtx()
+	defer cancel()
+	if e := database.GetRedis().HSet(ctx, monitorStatusPrefix+uid,
+		kind, time.Now().Unix(), kind+"Error", msg).Err(); e != nil {
+		slog.Warn("Record monitor status failed", "uid", uid, "err", e)
+	}
+}
+
+// GetMonitorStatus 读取监控运行情况
+func GetMonitorStatus(uid string) (*MonitorStatus, error) {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	m, err := database.GetRedis().HGetAll(ctx, monitorStatusPrefix+uid).Result()
+	if err != nil {
+		return nil, err
+	}
+	parse := func(k string) *time.Time {
+		sec, err := strconv.ParseInt(m[k], 10, 64)
+		if err != nil {
+			return nil
+		}
+		t := time.Unix(sec, 0)
+		return &t
+	}
+	return &MonitorStatus{
+		LastCheck:          parse("lastCheck"),
+		LastCheckError:     m["lastCheckError"],
+		LastKeepalive:      parse("lastKeepalive"),
+		LastKeepaliveError: m["lastKeepaliveError"],
+	}, nil
+}
+
+// HistoryEntry 一条动态（课表变动、新成绩、登录失效）
+type HistoryEntry struct {
+	Event string    `json:"event"`
+	Text  string    `json:"text"`
+	Time  time.Time `json:"time"`
+}
+
+func pushHistory(uid string, e *HistoryEntry) {
+	data, err := json.Marshal(e)
+	if err != nil {
+		return
+	}
+	ctx, cancel := storeCtx()
+	defer cancel()
+	_, err = database.GetRedis().TxPipelined(ctx, func(p redis.Pipeliner) error {
+		p.LPush(ctx, historyPrefix+uid, data)
+		p.LTrim(ctx, historyPrefix+uid, 0, historyMax-1)
+		return nil
+	})
+	if err != nil {
+		slog.Warn("Push history failed", "uid", uid, "err", err)
+	}
+}
+
+// GetHistory 最近的动态（新的在前）
+func GetHistory(uid string, limit int) ([]HistoryEntry, error) {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	items, err := database.GetRedis().LRange(ctx, historyPrefix+uid, 0, int64(limit-1)).Result()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]HistoryEntry, 0, len(items))
+	for _, it := range items {
+		var e HistoryEntry
+		if json.Unmarshal([]byte(it), &e) == nil {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }

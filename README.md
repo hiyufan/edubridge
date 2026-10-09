@@ -8,6 +8,9 @@
 
 - 🔐 **安全登录** — 验证码 + JWT 双 Token 认证，支持 Token 自动刷新；教务登录态持久化到 Redis，服务重启不掉线
 - 👀 **课表监控** — 后台定时检查课表，发现加课、减课/停课、换教室时推送通知，并保持教务登录不过期
+- 🎓 **成绩发布提醒** — 新成绩出来（或成绩被修改）时推送课程、成绩、绩点
+- ⏰ **上课提醒** — 每天定时推送当天/明天的课，或每节课开始前 N 分钟提醒
+- 📋 **监控状态** — 「我的」页面显示监控是否运行、上次检查时间和最近动态
 - 📅 **课表查询** — 按周切换，自动识别当前周，支持全学期课表
 - ⚠️ **冲突检测** — 自动检测同一时段重复安排的课程
 - 📊 **成绩查询** — 按学期筛选，显示学分、绩点等详细数据
@@ -131,7 +134,8 @@ jww.p/
 | `/api/score/stats` | GET | 成绩统计（GPA、学分、挂科等） |
 | `/api/score/semesters` | GET | 可选学期列表 |
 | `/api/schedule/diff` | GET | 最近一次检测到的课表变动 |
-| `/api/monitor/status` | GET | 课表监控状态 |
+| `/api/monitor/status` | GET | 监控状态、上次检查/保活时间、最近动态 |
+| `/api/notify/reminder` | GET/PUT | 查询/保存上课提醒设置 |
 | `/api/webhook/register` | POST | 注册 Webhook（`url`, `secret`） |
 | `/api/webhook/info` | GET | 查询已注册的 Webhook |
 | `/api/webhook/trigger` | POST | 把最近一次课表变动重新推送一次 |
@@ -153,7 +157,7 @@ Webhook 请求为 `POST application/json`，请求头 `X-JWW-Event` 为事件类
 }
 ```
 
-`event` 取值：`schedule-diff`（课表变动）、`session-expired`（需要重新登录）、`test`（测试）。`text` 可直接转发到微信/群机器人。
+`event` 取值：`schedule-diff`（课表变动）、`score-new`（新成绩）、`reminder`（上课提醒）、`session-expired`（需要重新登录）、`test`（测试）。`text` 可直接转发到微信/群机器人。
 
 ### 登录请求示例
 

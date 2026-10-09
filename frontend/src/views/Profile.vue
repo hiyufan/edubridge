@@ -61,6 +61,62 @@ const saveChannels = async () => {
   }
 }
 
+// 课表监控状态与最近动态
+const monitorStatus = ref(null)
+const expandedHistory = ref(new Set())
+const eventLabels = {
+  'schedule-diff': { label: '课表变动', color: '#007AFF' },
+  'score-new': { label: '新成绩', color: '#34C759' },
+  'session-expired': { label: '需重新登录', color: '#FF3B30' }
+}
+
+const loadMonitorStatus = async () => {
+  const res = await request.get('/monitor/status')
+  monitorStatus.value = res.data
+}
+
+const relativeTime = (iso) => {
+  if (!iso) return '尚未进行'
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+const toggleHistory = (idx) => {
+  const next = new Set(expandedHistory.value)
+  next.has(idx) ? next.delete(idx) : next.add(idx)
+  expandedHistory.value = next
+}
+
+const reloginNow = () => {
+  userStore.logout()
+  router.push('/login')
+}
+
+// 上课提醒
+const reminder = ref({ daily: false, dailyTime: '07:00', dailyTomorrow: false, beforeClass: false, beforeMinutes: 15 })
+const savingReminder = ref(false)
+const beforeOptions = [5, 10, 15, 20, 30, 60]
+
+const loadReminder = async () => {
+  const res = await request.get('/notify/reminder')
+  if (res.data) reminder.value = { ...reminder.value, ...res.data }
+}
+
+const saveReminder = async () => {
+  savingReminder.value = true
+  try {
+    await request.put('/notify/reminder', reminder.value)
+    ElMessage.success('提醒设置已保存')
+  } catch {
+  } finally {
+    savingReminder.value = false
+  }
+}
+
 // 功能 09: Webhook 配置
 const webhookUrl = ref('')
 const webhookSecret = ref('')
@@ -87,6 +143,12 @@ onMounted(async () => {
 
   try {
     await loadChannels()
+  } catch {}
+  try {
+    await loadMonitorStatus()
+  } catch {}
+  try {
+    await loadReminder()
   } catch {}
 
   // 功能 09: 获取 Webhook 信息
@@ -367,9 +429,107 @@ const getAvatarLetter = () => {
       </div>
     </div>
 
-    <!-- 课表变动通知 -->
+    <!-- 课表监控 -->
+    <div class="settings-section animate-warm-fade-in stagger-2" v-if="monitorStatus">
+      <div class="apple-section-header">课表监控</div>
+      <div class="apple-grouped-list">
+        <div class="apple-grouped-item" :class="{ 'item-clickable': !monitorStatus.monitoring }" @click="!monitorStatus.monitoring && reloginNow()">
+          <div class="item-content channel-row">
+            <div class="channel-head">
+              <span class="item-label">监控状态</span>
+              <span class="item-value" :style="{ color: monitorStatus.monitoring ? '#34C759' : '#FF3B30' }">
+                {{ monitorStatus.monitoring ? '运行中' : '已暂停，点此重新登录' }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="apple-grouped-item">
+          <div class="item-content channel-row">
+            <div class="channel-head">
+              <span class="item-label">上次检查</span>
+              <span class="item-value" :style="{ color: monitorStatus.lastCheckError ? '#FF3B30' : '' }">
+                {{ relativeTime(monitorStatus.lastCheck) }}{{ monitorStatus.lastCheck ? (monitorStatus.lastCheckError ? ' ✗' : ' ✓') : '' }}
+              </span>
+            </div>
+            <span v-if="monitorStatus.lastCheckError" class="channel-hint">{{ monitorStatus.lastCheckError }}</span>
+            <span v-if="monitorStatus.checkMinutes" class="channel-hint">每 {{ monitorStatus.checkMinutes }} 分钟检查一次课表和成绩</span>
+          </div>
+        </div>
+        <div v-if="!monitorStatus.notifyChannel" class="apple-grouped-item">
+          <div class="item-content">
+            <span class="channel-hint" style="color:#FF9500;">还没有开启通知方式，有变动时只能在这里看到</span>
+          </div>
+        </div>
+        <div class="apple-grouped-item">
+          <div class="item-content channel-row">
+            <span class="item-label">最近动态</span>
+            <span v-if="!monitorStatus.history?.length" class="channel-hint">暂无。课表或成绩有变化时会记录在这里</span>
+            <div
+              v-for="(h, idx) in monitorStatus.history"
+              :key="idx"
+              class="history-item"
+              @click="toggleHistory(idx)"
+            >
+              <div class="history-head">
+                <span class="history-tag" :style="{ color: eventLabels[h.event]?.color, borderColor: eventLabels[h.event]?.color }">
+                  {{ eventLabels[h.event]?.label || h.event }}
+                </span>
+                <span class="channel-hint">{{ relativeTime(h.time) }}</span>
+              </div>
+              <div class="history-text" :class="{ expanded: expandedHistory.has(idx) }">{{ h.text }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 上课提醒 -->
     <div class="settings-section animate-warm-fade-in stagger-2">
-      <div class="apple-section-header">课表变动通知</div>
+      <div class="apple-section-header">上课提醒</div>
+      <div class="apple-grouped-list">
+        <div class="apple-grouped-item">
+          <div class="item-content channel-row">
+            <div class="channel-head">
+              <span class="item-label">每日课表</span>
+              <el-switch v-model="reminder.daily" size="small" />
+            </div>
+            <div v-if="reminder.daily" class="reminder-row">
+              <span class="channel-hint">每天</span>
+              <el-time-select v-model="reminder.dailyTime" start="05:00" step="00:30" end="23:30" size="small" :clearable="false" style="width:110px" />
+              <span class="channel-hint">推送</span>
+              <el-radio-group v-model="reminder.dailyTomorrow" size="small">
+                <el-radio-button :value="false">当天</el-radio-button>
+                <el-radio-button :value="true">明天</el-radio-button>
+              </el-radio-group>
+              <span class="channel-hint">的课</span>
+            </div>
+          </div>
+        </div>
+        <div class="apple-grouped-item">
+          <div class="item-content channel-row">
+            <div class="channel-head">
+              <span class="item-label">课前提醒</span>
+              <el-switch v-model="reminder.beforeClass" size="small" />
+            </div>
+            <div v-if="reminder.beforeClass" class="reminder-row">
+              <span class="channel-hint">每节课开始前</span>
+              <el-select v-model="reminder.beforeMinutes" size="small" style="width:90px">
+                <el-option v-for="m in beforeOptions" :key="m" :label="`${m} 分钟`" :value="m" />
+              </el-select>
+            </div>
+          </div>
+        </div>
+        <div class="apple-grouped-item item-clickable" @click="!savingReminder && saveReminder()">
+          <div class="item-content">
+            <span class="item-label" style="color:#007AFF;">{{ savingReminder ? '保存中…' : '保存提醒设置' }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通知方式 -->
+    <div class="settings-section animate-warm-fade-in stagger-2">
+      <div class="apple-section-header">通知方式</div>
       <div class="apple-grouped-list">
         <div class="apple-grouped-item">
           <div class="item-content channel-row">
@@ -711,6 +871,48 @@ const getAvatarLetter = () => {
 .channel-hint {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.reminder-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.history-item {
+  padding: 8px 0;
+  border-top: 1px solid var(--el-border-color-lighter);
+  cursor: pointer;
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.history-tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-radius: 4px;
+}
+
+.history-text {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.history-text.expanded {
+  display: block;
 }
 
 .channel-hint a {
