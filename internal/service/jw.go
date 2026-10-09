@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -76,8 +77,6 @@ type JwService struct {
 	sessions      map[string]*Session
 	mu            sync.RWMutex
 	scheduleCache map[string]*ScheduleCache
-	webhookMu     sync.RWMutex
-	webhookStore  map[string]*webhookEntry
 	stopCh        chan struct{}
 }
 
@@ -101,19 +100,11 @@ type CourseChange struct {
 	New model.Course `json:"new"`
 }
 
-// webhookEntry webhook 注册项（service 包定义供 JwService 使用）
-type webhookEntry struct {
-	URL       string
-	Secret    string
-	Registered time.Time
-}
-
 // NewJwService 创建服务实例
 func NewJwService() *JwService {
 	svc := &JwService{
 		sessions:      make(map[string]*Session),
 		scheduleCache: make(map[string]*ScheduleCache),
-		webhookStore:  make(map[string]*webhookEntry),
 		stopCh:        make(chan struct{}),
 	}
 	go svc.cleanup()
@@ -123,35 +114,6 @@ func NewJwService() *JwService {
 // Close 停止后台 goroutine
 func (s *JwService) Close() {
 	close(s.stopCh)
-}
-
-// ForEachWebhook 遍历所有 webhook 注册（供 handler 调用）
-func (s *JwService) ForEachWebhook(fn func(url, secret string) bool) {
-	s.webhookMu.RLock()
-	defer s.webhookMu.RUnlock()
-	for _, entry := range s.webhookStore {
-		if !fn(entry.URL, entry.Secret) {
-			break
-		}
-	}
-}
-
-// RegisterWebhookURL 注册一个 webhook URL
-func (s *JwService) RegisterWebhookURL(sessionID, url, secret string) {
-	s.webhookMu.Lock()
-	s.webhookStore[sessionID] = &webhookEntry{
-		URL:       url,
-		Secret:    secret,
-		Registered: time.Now(),
-	}
-	s.webhookMu.Unlock()
-}
-
-// GetWebhookEntry 获取 webhook 注册条目
-func (s *JwService) GetWebhookEntry(sessionID string) *webhookEntry {
-	s.webhookMu.RLock()
-	defer s.webhookMu.RUnlock()
-	return s.webhookStore[sessionID]
 }
 
 // GetLatestScheduleDiff 获取最近一次课表变动
@@ -218,33 +180,38 @@ func courseKey(c model.Course) string {
 	return fmt.Sprintf("%s|%d|%d|%v", c.Name, c.DayOfWeek, c.PeriodStart, c.Weeks)
 }
 
-// triggerWebhooks 触发所有 webhook 推送（异步）
-func (s *JwService) triggerWebhooks(sessionID string, diff *ScheduleDiff) {
+// triggerWebhooks 向该用户自己注册的 webhook 推送课表变动（异步）
+func (s *JwService) triggerWebhooks(uid string, diff *ScheduleDiff) {
 	if diff == nil || (len(diff.Added) == 0 && len(diff.Removed) == 0 && len(diff.Changed) == 0) {
 		return
 	}
-	s.ForEachWebhook(func(url, secret string) bool {
-		body, _ := json.Marshal(diff)
-		req, _ := http.NewRequest("POST", url, strings.NewReader(string(body)))
-		req.Header.Set("Content-Type", "application/json")
-		if secret != "" {
-			mac := hmac.New(sha256.New, []byte(secret))
-			mac.Write(body)
-			sig := hex.EncodeToString(mac.Sum(nil))
-			req.Header.Set("X-Hub-Signature-256", "sha256="+sig)
+	entry, err := GetWebhook(uid)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			slog.Warn("Load webhook failed", "uid", uid, "err", err)
 		}
-		req.Header.Set("X-JWW-Event", "schedule-diff")
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			slog.Warn("Webhook push failed", "url", url, "err", err)
-			return true
-		}
-		defer resp.Body.Close()
-		io.ReadAll(resp.Body)
-		slog.Info("Webhook pushed", "url", url, "status", resp.StatusCode)
-		return true
-	})
+		return
+	}
+
+	body, _ := json.Marshal(diff)
+	req, _ := http.NewRequest("POST", entry.URL, strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	if entry.Secret != "" {
+		mac := hmac.New(sha256.New, []byte(entry.Secret))
+		mac.Write(body)
+		sig := hex.EncodeToString(mac.Sum(nil))
+		req.Header.Set("X-Hub-Signature-256", "sha256="+sig)
+	}
+	req.Header.Set("X-JWW-Event", "schedule-diff")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Warn("Webhook push failed", "url", entry.URL, "err", err)
+		return
+	}
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body)
+	slog.Info("Webhook pushed", "url", entry.URL, "status", resp.StatusCode)
 }
 
 // cleanup 定期清理过期会话（BUG-6 修复：有退出 channel）
@@ -1012,13 +979,17 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 	}
 	s.mu.Unlock()
 
+	if err := saveScheduleSnapshot(session.UID, result); err != nil {
+		slog.Warn("Save schedule snapshot failed", "uid", session.UID, "err", err)
+	}
+
 	if diff != nil && (len(diff.Added) > 0 || len(diff.Removed) > 0 || len(diff.Changed) > 0) {
 		slog.Info("Schedule diff detected",
 			"sessionID", sessionID,
 			"added", len(diff.Added),
 			"removed", len(diff.Removed),
 			"changed", len(diff.Changed))
-		go s.triggerWebhooks(sessionID, diff)
+		go s.triggerWebhooks(session.UID, diff)
 	}
 
 	return result, nil

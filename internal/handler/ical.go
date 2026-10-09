@@ -3,10 +3,10 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,37 +15,33 @@ import (
 	"jww/pkg/response"
 )
 
-// iCalTokenStore 内存存储 iCal token（token -> sessionID）
-var (
-	iCalTokenStore = make(map[string]*iCalTokenEntry)
-	iCalMu         sync.RWMutex
-)
-
-type iCalTokenEntry struct {
-	SessionID  string
-	ExpireTime time.Time
-}
-
-// GenerateICalToken 生成 90 天订阅 token
+// GenerateICalToken 生成 90 天订阅 token（持久化到 Redis，按学号关联，同一用户旧 token 失效）
 func (h *ScheduleHandler) GenerateICalToken(c *gin.Context) {
-	sessionIDStr, ok := getSessionID(c)
+	uid, ok := getUID(c)
 	if !ok {
 		response.Error(c, http.StatusUnauthorized, "无效的会话")
+		return
+	}
+	sessionIDStr, _ := getSessionID(c)
+
+	// 先拉一次课表，确保订阅时 Redis 里有课表快照
+	if _, err := service.GetJwService().GetFullSchedule(sessionIDStr, 20); err != nil {
+		response.Error(c, http.StatusInternalServerError, "获取课表失败")
 		return
 	}
 
 	// 生成随机 token
 	tokenBytes := make([]byte, 32)
-	rand.Read(tokenBytes)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		response.Error(c, http.StatusInternalServerError, "生成 token 失败")
+		return
+	}
 	token := base64.URLEncoding.EncodeToString(tokenBytes)
 
-	// 存储，90 天过期
-	iCalMu.Lock()
-	iCalTokenStore[token] = &iCalTokenEntry{
-		SessionID:  sessionIDStr,
-		ExpireTime: time.Now().Add(90 * 24 * time.Hour),
+	if err := service.SaveICalToken(uid, token); err != nil {
+		response.Error(c, http.StatusInternalServerError, "保存 token 失败")
+		return
 	}
-	iCalMu.Unlock()
 
 	// 返回订阅 URL
 	subscribeURL := fmt.Sprintf("%s/api/schedule/ical/subscribe?token=%s", getBaseURL(c), token)
@@ -53,11 +49,11 @@ func (h *ScheduleHandler) GenerateICalToken(c *gin.Context) {
 		"token":    token,
 		"url":      subscribeURL,
 		"webcal":   "webcal://" + strings.TrimPrefix(subscribeURL, "https://"),
-		"expireAt": time.Now().Add(90 * 24 * time.Hour).Format("2006-01-02"),
+		"expireAt": time.Now().Add(service.ICalTokenTTL).Format("2006-01-02"),
 	})
 }
 
-// SubscribeICal 通过 token 免登录订阅 iCal
+// SubscribeICal 通过 token 免登录订阅 iCal（读取用户最近一次登录时的课表快照）
 func (h *ScheduleHandler) SubscribeICal(c *gin.Context) {
 	token := c.Query("token")
 	if token == "" {
@@ -65,19 +61,18 @@ func (h *ScheduleHandler) SubscribeICal(c *gin.Context) {
 		return
 	}
 
-	iCalMu.RLock()
-	entry, exists := iCalTokenStore[token]
-	iCalMu.RUnlock()
-
-	if !exists || time.Now().After(entry.ExpireTime) {
+	uid, err := service.LookupICalToken(token)
+	if errors.Is(err, service.ErrNotFound) {
 		c.JSON(401, gin.H{"error": "token 已过期或无效"})
 		return
 	}
+	if err != nil {
+		c.JSON(500, gin.H{"error": "读取 token 失败"})
+		return
+	}
 
-	// 获取课表
-	jwSvc := service.GetJwService()
-	fullSchedule, err := jwSvc.GetFullSchedule(entry.SessionID, 20)
-	if err != nil || fullSchedule == nil {
+	fullSchedule, err := service.GetScheduleSnapshot(uid)
+	if err != nil {
 		c.JSON(500, gin.H{"error": "获取课表失败"})
 		return
 	}
@@ -114,38 +109,26 @@ func (h *ScheduleHandler) GetICal(c *gin.Context) {
 
 // GetICalTokenInfo 获取当前用户的 token 信息
 func (h *ScheduleHandler) GetICalTokenInfo(c *gin.Context) {
-	sessionIDStr, ok := getSessionID(c)
+	uid, ok := getUID(c)
 	if !ok {
 		response.Error(c, http.StatusUnauthorized, "无效的会话")
 		return
 	}
 
-	iCalMu.RLock()
-	defer iCalMu.RUnlock()
-
-	var tokenInfo *struct {
-		Token    string `json:"token"`
-		ExpireAt string `json:"expireAt"`
-	}
-
-	for token, entry := range iCalTokenStore {
-		if entry.SessionID == sessionIDStr && time.Now().Before(entry.ExpireTime) {
-			tokenInfo = &struct {
-				Token    string `json:"token"`
-				ExpireAt string `json:"expireAt"`
-			}{
-				Token:    token,
-				ExpireAt: entry.ExpireTime.Format("2006-01-02"),
-			}
-			break
-		}
-	}
-
-	if tokenInfo == nil {
+	token, expireAt, err := service.GetUserICalToken(uid)
+	if errors.Is(err, service.ErrNotFound) {
 		response.Success(c, nil)
 		return
 	}
-	response.Success(c, tokenInfo)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "读取 token 失败")
+		return
+	}
+
+	response.Success(c, gin.H{
+		"token":    token,
+		"expireAt": expireAt.Format("2006-01-02"),
+	})
 }
 
 // generateICalContent 生成 iCalendar 格式内容

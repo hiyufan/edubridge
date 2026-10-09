@@ -23,6 +23,11 @@ func getSessionID(c *gin.Context) (string, bool) {
 	return id, ok
 }
 
+func getUID(c *gin.Context) (string, bool) {
+	uid := c.GetString("uid")
+	return uid, uid != ""
+}
+
 type AuthHandler struct {
 	jwtSecret        string
 	jwtRefreshSecret string

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -17,14 +18,8 @@ import (
 	"jww/pkg/response"
 )
 
-// RegisterWebhook 注册 Webhook（写入 service 层的统一存储）
+// RegisterWebhook 注册 Webhook（持久化到 Redis，按学号关联）
 func (h *ScheduleHandler) RegisterWebhook(c *gin.Context) {
-	sessionIDStr, ok := getSessionID(c)
-	if !ok {
-		response.Error(c, http.StatusUnauthorized, "无效的会话")
-		return
-	}
-
 	var req struct {
 		URL    string `json:"url" binding:"required,url"`
 		Secret string `json:"secret"`
@@ -34,8 +29,19 @@ func (h *ScheduleHandler) RegisterWebhook(c *gin.Context) {
 		return
 	}
 
-	jwSvc := service.GetJwService()
-	jwSvc.RegisterWebhookURL(sessionIDStr, req.URL, req.Secret)
+	uid, ok := getUID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "无效的会话")
+		return
+	}
+	if err := service.SaveWebhook(uid, &service.WebhookEntry{
+		URL:        req.URL,
+		Secret:     req.Secret,
+		Registered: time.Now(),
+	}); err != nil {
+		response.Error(c, http.StatusInternalServerError, "webhook 保存失败")
+		return
+	}
 
 	response.Success(c, gin.H{"message": "webhook 注册成功"})
 }
@@ -52,9 +58,14 @@ func (h *ScheduleHandler) TriggerWebhook(c *gin.Context) {
 	diff := jwSvc.GetLatestScheduleDiff(sessionIDStr)
 
 	summary := summarizeDiff(diff)
-	entry := jwSvc.GetWebhookEntry(sessionIDStr)
-	if entry == nil {
+	uid, _ := getUID(c)
+	entry, err := service.GetWebhook(uid)
+	if errors.Is(err, service.ErrNotFound) {
 		response.Error(c, http.StatusBadRequest, "未注册 webhook")
+		return
+	}
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "读取 webhook 失败")
 		return
 	}
 
@@ -69,17 +80,19 @@ func (h *ScheduleHandler) TriggerWebhook(c *gin.Context) {
 
 // GetWebhookInfo 获取当前用户的 webhook 注册信息
 func (h *ScheduleHandler) GetWebhookInfo(c *gin.Context) {
-	sessionIDStr, ok := getSessionID(c)
+	uid, ok := getUID(c)
 	if !ok {
 		response.Error(c, http.StatusUnauthorized, "无效的会话")
 		return
 	}
 
-	jwSvc := service.GetJwService()
-	entry := jwSvc.GetWebhookEntry(sessionIDStr)
-
-	if entry == nil {
+	entry, err := service.GetWebhook(uid)
+	if errors.Is(err, service.ErrNotFound) {
 		response.Success(c, gin.H{"registered": false})
+		return
+	}
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "读取 webhook 失败")
 		return
 	}
 
