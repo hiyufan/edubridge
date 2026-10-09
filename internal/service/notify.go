@@ -31,26 +31,67 @@ type NotifyPayload struct {
 
 var notifyClient = &http.Client{Timeout: 10 * time.Second}
 
-// notifyUser 异步向用户配置的所有通知渠道推送（目前为 Webhook）
+// notifyUser 异步向用户开启的所有通知渠道推送
 func notifyUser(uid, event, text string, data interface{}) {
 	payload := &NotifyPayload{Event: event, Text: text, Data: data, Time: time.Now()}
 	go func() {
-		if err := SendNotify(uid, payload); err != nil && !errors.Is(err, ErrNotFound) {
+		if _, err := SendNotify(uid, payload); err != nil && !errors.Is(err, ErrNotFound) {
 			slog.Warn("Notify failed", "uid", uid, "event", event, "err", err)
 		}
 	}()
 }
 
-// SendNotify 同步推送，返回第一个错误；用户没有配置任何渠道时返回 ErrNotFound
-func SendNotify(uid string, payload *NotifyPayload) error {
-	entry, err := GetWebhook(uid)
-	if err != nil {
-		return err
-	}
-	return sendWebhook(entry, payload)
+// ChannelResult 单个渠道的发送结果
+type ChannelResult struct {
+	Channel string `json:"channel"`
+	Error   string `json:"error,omitempty"`
 }
 
-func sendWebhook(entry *WebhookEntry, payload *NotifyPayload) error {
+// SendNotify 同步向用户开启的所有渠道推送；用户没有开启任何渠道时返回 ErrNotFound，
+// 任一渠道失败时返回汇总错误（其它渠道照常发送）
+func SendNotify(uid string, payload *NotifyPayload) ([]ChannelResult, error) {
+	type sender struct {
+		name string
+		send func() error
+	}
+	var senders []sender
+
+	if entry, err := GetWebhook(uid); err == nil {
+		senders = append(senders, sender{"webhook", func() error { return SendWebhook(entry, payload) }})
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	channels, err := GetNotifyChannels(uid)
+	if err != nil {
+		return nil, err
+	}
+	if ch := channels.PushPlus; ch != nil {
+		senders = append(senders, sender{"pushplus", func() error { return sendPushPlus(ch, payload) }})
+	}
+	if ch := channels.Email; ch != nil {
+		senders = append(senders, sender{"email", func() error { return sendEmail(ch, payload) }})
+	}
+	if ch := channels.Bot; ch != nil {
+		senders = append(senders, sender{"bot", func() error { return sendBot(ch, payload) }})
+	}
+	if len(senders) == 0 {
+		return nil, ErrNotFound
+	}
+
+	results := make([]ChannelResult, len(senders))
+	var errs []error
+	for i, s := range senders {
+		results[i].Channel = s.name
+		if err := s.send(); err != nil {
+			results[i].Error = err.Error()
+			errs = append(errs, fmt.Errorf("%s: %w", s.name, err))
+		}
+	}
+	return results, errors.Join(errs...)
+}
+
+// SendWebhook 只向 Webhook 推送
+func SendWebhook(entry *WebhookEntry, payload *NotifyPayload) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err

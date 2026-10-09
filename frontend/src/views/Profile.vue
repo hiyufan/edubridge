@@ -18,6 +18,49 @@ const notifyPermission = ref('default')
 // 功能 07: iCal 订阅信息
 const iCalTokenInfo = ref(null)
 
+// 课表变动通知渠道（可同时开启多个）
+const emailAvailable = ref(false)
+const channelForm = ref({
+  pushplusOn: false, pushplusToken: '',
+  emailOn: false, emailTo: '',
+  botOn: false, botType: 'wecom', botUrl: '', botSecret: ''
+})
+const botTypes = [
+  { value: 'wecom', label: '企业微信', placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...' },
+  { value: 'dingtalk', label: '钉钉', placeholder: 'https://oapi.dingtalk.com/robot/send?access_token=...' },
+  { value: 'feishu', label: '飞书', placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/...' }
+]
+const channelNames = { webhook: 'Webhook', pushplus: '微信', email: '邮箱', bot: '群机器人' }
+const savingChannels = ref(false)
+const testingNotify = ref(false)
+
+const loadChannels = async () => {
+  const res = await request.get('/notify/channels')
+  const c = res.data?.channels || {}
+  emailAvailable.value = !!res.data?.emailAvailable
+  channelForm.value = {
+    pushplusOn: !!c.pushplus, pushplusToken: c.pushplus?.token || '',
+    emailOn: !!c.email, emailTo: c.email?.to || '',
+    botOn: !!c.bot, botType: c.bot?.type || 'wecom', botUrl: c.bot?.url || '', botSecret: c.bot?.secret || ''
+  }
+}
+
+const saveChannels = async () => {
+  const f = channelForm.value
+  savingChannels.value = true
+  try {
+    await request.put('/notify/channels', {
+      pushplus: f.pushplusOn ? { token: f.pushplusToken } : null,
+      email: f.emailOn ? { to: f.emailTo } : null,
+      bot: f.botOn ? { type: f.botType, url: f.botUrl, secret: f.botType === 'wecom' ? '' : f.botSecret } : null
+    })
+    ElMessage.success('通知设置已保存')
+  } catch {
+  } finally {
+    savingChannels.value = false
+  }
+}
+
 // 功能 09: Webhook 配置
 const webhookUrl = ref('')
 const webhookSecret = ref('')
@@ -42,6 +85,10 @@ onMounted(async () => {
     iCalTokenInfo.value = icalRes.data
   } catch {}
 
+  try {
+    await loadChannels()
+  } catch {}
+
   // 功能 09: 获取 Webhook 信息
   try {
     const whRes = await request.get('/webhook/info')
@@ -62,12 +109,26 @@ const regenerateICalToken = async () => {
   }
 }
 
-// 发送测试通知，确认通知渠道可用
+// 向所有已开启的渠道发送测试通知，并逐个显示结果
 const testNotify = async () => {
+  testingNotify.value = true
   try {
-    await request.post('/notify/test')
-    ElMessage.success('测试通知已发送')
-  } catch {}
+    const res = await request.post('/notify/test')
+    const results = res.data?.results || []
+    const failed = results.filter(r => r.error)
+    if (failed.length === 0) {
+      ElMessage.success(`测试通知已发送（${results.map(r => channelNames[r.channel] || r.channel).join('、')}）`)
+    } else {
+      ElMessage({
+        type: 'warning',
+        duration: 8000,
+        message: failed.map(r => `${channelNames[r.channel] || r.channel}发送失败：${r.error}`).join('；')
+      })
+    }
+  } catch {
+  } finally {
+    testingNotify.value = false
+  }
 }
 
 // 功能 09: 保存 Webhook
@@ -306,6 +367,61 @@ const getAvatarLetter = () => {
       </div>
     </div>
 
+    <!-- 课表变动通知 -->
+    <div class="settings-section animate-warm-fade-in stagger-2">
+      <div class="apple-section-header">课表变动通知</div>
+      <div class="apple-grouped-list">
+        <div class="apple-grouped-item">
+          <div class="item-content channel-row">
+            <div class="channel-head">
+              <span class="item-label">微信（PushPlus）</span>
+              <el-switch v-model="channelForm.pushplusOn" size="small" />
+            </div>
+            <template v-if="channelForm.pushplusOn">
+              <el-input v-model="channelForm.pushplusToken" placeholder="PushPlus token" size="small" />
+              <span class="channel-hint">在 <a href="https://www.pushplus.plus" target="_blank" rel="noopener">pushplus.plus</a> 微信扫码登录后获取 token</span>
+            </template>
+          </div>
+        </div>
+        <div class="apple-grouped-item">
+          <div class="item-content channel-row">
+            <div class="channel-head">
+              <span class="item-label">邮箱</span>
+              <el-switch v-model="channelForm.emailOn" size="small" :disabled="!emailAvailable && !channelForm.emailOn" />
+            </div>
+            <el-input v-if="channelForm.emailOn" v-model="channelForm.emailTo" placeholder="you@example.com" size="small" />
+            <span v-if="!emailAvailable" class="channel-hint">服务器未配置发信邮箱，暂不可用</span>
+          </div>
+        </div>
+        <div class="apple-grouped-item">
+          <div class="item-content channel-row">
+            <div class="channel-head">
+              <span class="item-label">群机器人</span>
+              <el-switch v-model="channelForm.botOn" size="small" />
+            </div>
+            <template v-if="channelForm.botOn">
+              <el-radio-group v-model="channelForm.botType" size="small">
+                <el-radio-button v-for="b in botTypes" :key="b.value" :value="b.value">{{ b.label }}</el-radio-button>
+              </el-radio-group>
+              <el-input v-model="channelForm.botUrl" :placeholder="botTypes.find(b => b.value === channelForm.botType).placeholder" size="small" />
+              <el-input v-if="channelForm.botType !== 'wecom'" v-model="channelForm.botSecret" placeholder="加签密钥（可选）" size="small" />
+              <span v-if="channelForm.botType === 'dingtalk'" class="channel-hint">钉钉机器人如设置了关键词，请包含「课表」</span>
+            </template>
+          </div>
+        </div>
+        <div class="apple-grouped-item item-clickable" @click="!savingChannels && saveChannels()">
+          <div class="item-content">
+            <span class="item-label" style="color:#007AFF;">{{ savingChannels ? '保存中…' : '保存通知设置' }}</span>
+          </div>
+        </div>
+        <div class="apple-grouped-item item-clickable" @click="!testingNotify && testNotify()">
+          <div class="item-content">
+            <span class="item-label" style="color:#007AFF;">{{ testingNotify ? '发送中…' : '发送测试通知' }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 功能 07: iCal 订阅信息 -->
     <div class="settings-section animate-warm-fade-in stagger-2" v-if="iCalTokenInfo">
       <div class="apple-section-header">日历订阅</div>
@@ -378,17 +494,6 @@ const getAvatarLetter = () => {
           </div>
           <div class="item-content">
             <span class="item-label" style="color:#007AFF;">保存 Webhook 配置</span>
-          </div>
-        </div>
-        <div v-if="webhookInfo?.registered" class="apple-grouped-item item-clickable" @click="testNotify">
-          <div class="item-icon" style="background:rgba(0,122,255,0.1);">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <line x1="22" y1="2" x2="11" y2="13"/>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-            </svg>
-          </div>
-          <div class="item-content">
-            <span class="item-label" style="color:#007AFF;">发送测试通知</span>
           </div>
         </div>
         <!-- Webhook 历史 -->
@@ -590,6 +695,28 @@ const getAvatarLetter = () => {
 }
 
 /* Settings Section */
+.channel-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
+.channel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.channel-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.channel-hint a {
+  color: #007AFF;
+}
+
 .settings-section {
   display: flex;
   flex-direction: column;

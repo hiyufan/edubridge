@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -18,6 +19,16 @@ type Config struct {
 	MonitorCheck time.Duration
 	MySQL        MySQLConfig
 	Redis        RedisConfig
+	SMTP         SMTPConfig
+}
+
+// SMTPConfig 发信邮箱（用于邮件通知，可不配置）
+type SMTPConfig struct {
+	Host     string
+	Port     int
+	User     string
+	Password string
+	From     string
 }
 
 type MySQLConfig struct {
@@ -87,6 +98,16 @@ func Load() *Config {
 	redisPassword := os.Getenv("REDIS_PASSWORD")
 	redisDB := 0
 
+	smtpPort := 465
+	if v := os.Getenv("SMTP_PORT"); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil {
+			log.Printf("invalid SMTP_PORT=%q, using 465", v)
+		} else {
+			smtpPort = p
+		}
+	}
+
 	return &Config{
 		MonitorKeepalive: durationEnv("MONITOR_KEEPALIVE_INTERVAL", 10*time.Minute),
 		MonitorCheck:     durationEnv("MONITOR_CHECK_INTERVAL", time.Hour),
@@ -101,6 +122,13 @@ func Load() *Config {
 			User:     mysqlUser,
 			Password: mysqlPassword,
 			Database: mysqlDatabase,
+		},
+		SMTP: SMTPConfig{
+			Host:     os.Getenv("SMTP_HOST"),
+			Port:     smtpPort,
+			User:     os.Getenv("SMTP_USER"),
+			Password: os.Getenv("SMTP_PASSWORD"),
+			From:     os.Getenv("SMTP_FROM"),
 		},
 		Redis: RedisConfig{
 			Host:     redisHost,

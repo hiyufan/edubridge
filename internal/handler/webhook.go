@@ -53,16 +53,21 @@ func (h *ScheduleHandler) TriggerWebhook(c *gin.Context) {
 	}
 	summary := diff.Summary()
 
-	err = service.SendNotify(uid, &service.NotifyPayload{
+	entry, err := service.GetWebhook(uid)
+	if errors.Is(err, service.ErrNotFound) {
+		response.Error(c, http.StatusBadRequest, "未注册 webhook")
+		return
+	}
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "读取 webhook 失败")
+		return
+	}
+	err = service.SendWebhook(entry, &service.NotifyPayload{
 		Event: service.EventScheduleDiff,
 		Text:  summary,
 		Data:  diff,
 		Time:  time.Now(),
 	})
-	if errors.Is(err, service.ErrNotFound) {
-		response.Error(c, http.StatusBadRequest, "未注册 webhook")
-		return
-	}
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "推送失败: "+err.Error())
 		return

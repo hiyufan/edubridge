@@ -154,6 +154,8 @@ func main() {
 			protected.GET("/score/stats", scoreHandler.GetScoreStats)
 
 			protected.POST("/notify/test", notifyHandler.TestNotify)
+			protected.GET("/notify/channels", notifyHandler.GetChannels)
+			protected.PUT("/notify/channels", notifyHandler.SaveChannels)
 			protected.GET("/monitor/status", notifyHandler.MonitorStatus)
 
 			protected.GET("/schedule/ical", scheduleHandler.GetICal)
@@ -175,6 +177,7 @@ func main() {
 		c.JSON(200, gin.H{"name": "jw-server-go", "version": "1.0.0"})
 	})
 
+	service.ConfigureEmail(service.SMTPConfig(cfg.SMTP))
 	service.GetJwService().StartMonitor(cfg.MonitorKeepalive, cfg.MonitorCheck)
 
 	log.Printf("Server starting on http://localhost:%s", cfg.Port)

@@ -15,7 +15,7 @@
 - 🧭 **今日课表** — 首页快速查看当天课程
 - 📱 **响应式设计** — 支持手机和桌面端
 - 🗓️ **iCal 订阅** — 生成标准 iCalendar 格式，可导入 Google Calendar/Apple Calendar/Outlook
-- 🔔 **Webhook 通知** — 课表变动、教务登录失效时推送到指定 URL（格式见下文）
+- 🔔 **多渠道通知** — 课表变动、教务登录失效时推送到微信（PushPlus）、邮箱、企业微信/钉钉/飞书群机器人或自定义 Webhook，可同时开启多个
 
 ## 技术栈
 
@@ -135,7 +135,8 @@ jww.p/
 | `/api/webhook/register` | POST | 注册 Webhook（`url`, `secret`） |
 | `/api/webhook/info` | GET | 查询已注册的 Webhook |
 | `/api/webhook/trigger` | POST | 把最近一次课表变动重新推送一次 |
-| `/api/notify/test` | POST | 发送测试通知 |
+| `/api/notify/channels` | GET/PUT | 查询/保存通知渠道（微信、邮箱、群机器人） |
+| `/api/notify/test` | POST | 向所有已开启的渠道发送测试通知，返回各渠道结果 |
 
 ### 课表监控与 Webhook
 
@@ -230,6 +231,11 @@ server {
 | `PORT` | ❌ | `3000` | 服务端口 |
 | `MONITOR_KEEPALIVE_INTERVAL` | ❌ | `10m` | 保持教务登录的访问间隔，需小于学校会话超时时间 |
 | `MONITOR_CHECK_INTERVAL` | ❌ | `1h` | 完整拉取课表比对变动的间隔 |
+| `SMTP_HOST` | ❌ | — | 发信邮箱 SMTP 服务器（如 `smtp.qq.com`），不配置则邮件通知不可用 |
+| `SMTP_PORT` | ❌ | `465` | 465 使用 SSL，587 等使用 STARTTLS |
+| `SMTP_USER` | ❌ | — | 发信账号 |
+| `SMTP_PASSWORD` | ❌ | — | 授权码（QQ/163 邮箱需在邮箱设置中开启 SMTP 并生成授权码） |
+| `SMTP_FROM` | ❌ | 同 `SMTP_USER` | 发件人地址 |
 
 ## 相关文档
 
