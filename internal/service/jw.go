@@ -1,9 +1,7 @@
 package service
 
 import (
-	"crypto/hmac"
 	"crypto/md5"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -31,7 +29,9 @@ const (
 	serviceScheduleCacheTTL = 5  * time.Minute // 课表缓存过期时间
 )
 
-const baseURL = "https://jw.fzrjxy.com"
+var baseURL = "https://jw.fzrjxy.com" // 测试中会替换为本地假服务器
+
+const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 var (
 	jwService *JwService
@@ -61,8 +61,7 @@ type Session struct {
 	HttpClient  *http.Client
 	CookieJar   *jar
 	UID         string
-	PushToken   string
-	ExpireTime  time.Time
+	ExpireTime  time.Time // 内存中的过期时间（已登录会话每次使用都会续期）
 	ScoreCache  *ScoreCache
 }
 
@@ -74,36 +73,26 @@ type ScoreCache struct {
 
 // JwService 教务服务
 type JwService struct {
-	sessions      map[string]*Session
+	sessions      map[string]*Session       // 登录前会话，key 为前端 sessionID
+	users         map[string]*Session       // 已登录会话，key 为学号
+	sidUID        map[string]string         // 前端 sessionID -> 学号
 	mu            sync.RWMutex
-	scheduleCache map[string]*ScheduleCache
+	scheduleCache map[string]*ScheduleCache // key 为学号
+	snapMu        sync.Mutex
 	stopCh        chan struct{}
 }
 
 type ScheduleCache struct {
-	Data      *model.FullSchedule
-	PrevData  *model.FullSchedule   // 上一次快照，用于 diff
-	LatestDiff *ScheduleDiff        // 最近一次变动差分
-	Expire    time.Time
-}
-
-// ScheduleDiff 课表变动差分
-type ScheduleDiff struct {
-	Added   []model.Course `json:"added"`
-	Removed []model.Course `json:"removed"`
-	Changed []CourseChange `json:"changed"`
-}
-
-// CourseChange 课程变更项
-type CourseChange struct {
-	Old model.Course `json:"old"`
-	New model.Course `json:"new"`
+	Data   *model.FullSchedule
+	Expire time.Time
 }
 
 // NewJwService 创建服务实例
 func NewJwService() *JwService {
 	svc := &JwService{
 		sessions:      make(map[string]*Session),
+		users:         make(map[string]*Session),
+		sidUID:        make(map[string]string),
 		scheduleCache: make(map[string]*ScheduleCache),
 		stopCh:        make(chan struct{}),
 	}
@@ -114,227 +103,6 @@ func NewJwService() *JwService {
 // Close 停止后台 goroutine
 func (s *JwService) Close() {
 	close(s.stopCh)
-}
-
-// GetLatestScheduleDiff 获取最近一次课表变动
-func (s *JwService) GetLatestScheduleDiff(sessionID string) *ScheduleDiff {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if cache, ok := s.scheduleCache[sessionID]; ok {
-		return cache.LatestDiff
-	}
-	return nil
-}
-
-// computeScheduleDiff 计算两次课表快照的差分
-func computeScheduleDiff(old, new *model.FullSchedule) *ScheduleDiff {
-	if old == nil || new == nil {
-		return nil
-	}
-	if old == new {
-		return nil
-	}
-
-	diff := &ScheduleDiff{}
-
-	// 建立旧课表 map（按 name+dayOfWeek+periodStart 唯一标识）
-	oldMap := make(map[string]model.Course)
-	for _, c := range old.Courses {
-		key := courseKey(c)
-		oldMap[key] = c
-	}
-
-	newMap := make(map[string]model.Course)
-	for _, c := range new.Courses {
-		key := courseKey(c)
-		newMap[key] = c
-	}
-
-	// 新增：旧没有，新有
-	for key, c := range newMap {
-		if _, exists := oldMap[key]; !exists {
-			diff.Added = append(diff.Added, c)
-		}
-	}
-
-	// 删除：旧有，新没有
-	for key, c := range oldMap {
-		if _, exists := newMap[key]; !exists {
-			diff.Removed = append(diff.Removed, c)
-		}
-	}
-
-	// 变更：旧新都有，但 room/teacher 不同
-	for key, newC := range newMap {
-		if oldC, exists := oldMap[key]; exists {
-			if oldC.Room != newC.Room || oldC.Teacher != newC.Teacher {
-				diff.Changed = append(diff.Changed, CourseChange{Old: oldC, New: newC})
-			}
-		}
-	}
-
-	return diff
-}
-
-func courseKey(c model.Course) string {
-	return fmt.Sprintf("%s|%d|%d|%v", c.Name, c.DayOfWeek, c.PeriodStart, c.Weeks)
-}
-
-// triggerWebhooks 向该用户自己注册的 webhook 推送课表变动（异步）
-func (s *JwService) triggerWebhooks(uid string, diff *ScheduleDiff) {
-	if diff == nil || (len(diff.Added) == 0 && len(diff.Removed) == 0 && len(diff.Changed) == 0) {
-		return
-	}
-	entry, err := GetWebhook(uid)
-	if err != nil {
-		if !errors.Is(err, ErrNotFound) {
-			slog.Warn("Load webhook failed", "uid", uid, "err", err)
-		}
-		return
-	}
-
-	body, _ := json.Marshal(diff)
-	req, _ := http.NewRequest("POST", entry.URL, strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	if entry.Secret != "" {
-		mac := hmac.New(sha256.New, []byte(entry.Secret))
-		mac.Write(body)
-		sig := hex.EncodeToString(mac.Sum(nil))
-		req.Header.Set("X-Hub-Signature-256", "sha256="+sig)
-	}
-	req.Header.Set("X-JWW-Event", "schedule-diff")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		slog.Warn("Webhook push failed", "url", entry.URL, "err", err)
-		return
-	}
-	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
-	slog.Info("Webhook pushed", "url", entry.URL, "status", resp.StatusCode)
-}
-
-// cleanup 定期清理过期会话（BUG-6 修复：有退出 channel）
-func (s *JwService) cleanup() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		case <-ticker.C:
-			s.mu.Lock()
-			now := time.Now()
-			for id, session := range s.sessions {
-				if now.After(session.ExpireTime) {
-					delete(s.sessions, id)
-				}
-			}
-			for id, cache := range s.scheduleCache {
-				if now.After(cache.Expire) {
-					delete(s.scheduleCache, id)
-				}
-			}
-			s.mu.Unlock()
-		}
-	}
-}
-
-// getSession 获取或创建会话（C8 优化：缩小锁粒度，读锁检查→写锁创建的双重检查模式）
-func (s *JwService) getSession(sessionID string) *Session {
-	// 第一次尝试：读锁检查（大多数情况 session 已存在且未过期）
-	s.mu.RLock()
-	session, exists := s.sessions[sessionID]
-	if exists && !time.Now().After(session.ExpireTime) {
-		s.mu.RUnlock()
-		return session
-	}
-	s.mu.RUnlock()
-
-	// 需要创建新 session，升级为写锁
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// 双重检查：持有写锁后再次确认（其他 goroutine 可能已创建）
-	session, exists = s.sessions[sessionID]
-	if !exists || time.Now().After(session.ExpireTime) {
-		cookieJar := &jar{}
-		client := resty.New()
-		client.SetBaseURL(baseURL)
-		client.SetTimeout(20 * time.Second)
-		client.SetCookieJar(cookieJar)
-		client.SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-		client.SetHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-		client.SetHeader("Connection", "keep-alive")
-		client.SetRedirectPolicy(resty.FlexibleRedirectPolicy(10))
-
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     90 * time.Second,
-				TLSHandshakeTimeout: 20 * time.Second,
-			},
-			Timeout: 20 * time.Second,
-			Jar:     cookieJar,
-		}
-
-		session = &Session{
-			Client:     client,
-			HttpClient: httpClient,
-			CookieJar:  cookieJar,
-			ExpireTime: time.Now().Add(serviceSessionTTL),
-		}
-		s.sessions[sessionID] = session
-	}
-	return session
-}
-
-// SetPushToken 设置用户的推送 token
-func (s *JwService) SetPushToken(sessionID, token string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if session, ok := s.sessions[sessionID]; ok {
-		session.PushToken = token
-	}
-}
-
-// ForEachSession 遍历所有活跃会话（用于后台任务）
-func (s *JwService) ForEachSession(fn func(sessionID string, pushToken string) bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for id, session := range s.sessions {
-		if time.Now().After(session.ExpireTime) || session.UID == "" {
-			continue
-		}
-		if !fn(id, session.PushToken) {
-			break
-		}
-	}
-}
-
-// GetScheduleTimeInfo 获取课表时间信息（当前周和学期起始日）
-func (s *JwService) GetScheduleTimeInfo(sessionID string) (semesterStart string, currentWeek int, totalWeeks int) {
-	s.mu.RLock()
-	cache, ok := s.scheduleCache[sessionID]
-	if ok && cache.Data != nil {
-		semesterStart = cache.Data.SemesterStart
-		currentWeek = cache.Data.CurrentWeek
-		totalWeeks = cache.Data.TotalWeeks
-	}
-	s.mu.RUnlock()
-	return
-}
-
-// checkSession 验证会话是否有效
-func (s *JwService) checkSession(sessionID string) (*Session, error) {
-	s.mu.RLock()
-	session, exists := s.sessions[sessionID]
-	s.mu.RUnlock()
-
-	if !exists || time.Now().After(session.ExpireTime) || session.UID == "" {
-		return nil, fmt.Errorf("登录已过期，请重新登录")
-	}
-	return session, nil
 }
 
 // FetchCaptcha 获取验证码
@@ -451,11 +219,7 @@ func (s *JwService) Login(sessionID, username, password, captcha, loginType stri
 		}
 	}
 
-	s.mu.Lock()
-	session.UID = username
-	session.ExpireTime = time.Now().Add(serviceSessionTTL)
-	s.mu.Unlock()
-
+	s.bindLogin(sessionID, username, session)
 	return nil
 }
 
@@ -519,6 +283,10 @@ func (s *JwService) fetchScheduleParams(session *Session) (*goquery.Document, *S
 	}
 
 	html := resp.String()
+
+	if !strings.Contains(html, "课程表") && isLoginPage(resp.RawResponse.Request.URL.String(), html) {
+		return nil, nil, ErrSessionExpired
+	}
 
 	// 情况1：入口页直接是课表
 	if strings.Contains(html, "课程表") {
@@ -799,10 +567,15 @@ func CalcRealCurrentWeek(semesterStart string, maxWeek int) int {
 
 // GetFullSchedule 获取全学期课表（并发）
 func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullSchedule, error) {
+	session, err := s.checkSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
 	// 检查缓存（读锁范围覆盖整个深拷贝过程，防止返回值在锁外被并发修改）
 	s.mu.RLock()
-	cache, ok := s.scheduleCache[sessionID]
-	if ok && time.Now().Before(cache.Expire) {
+	cache, ok := s.scheduleCache[session.UID]
+	if ok && time.Now().Before(cache.Expire) && cache.Data.TotalWeeks == maxWeek {
 		// 深拷贝：防止返回的指针在锁释放后与写操作产生 data race
 		result := *cache.Data
 		result.Courses = make([]model.Course, len(cache.Data.Courses))
@@ -812,21 +585,84 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 	}
 	s.mu.RUnlock()
 
-	session, err := s.checkSession(sessionID)
+	return s.refreshSchedule(session, maxWeek)
+}
+
+// refreshSchedule 从教务系统拉取完整课表，写入缓存与快照，并检测变动
+func (s *JwService) refreshSchedule(session *Session, maxWeek int) (*model.FullSchedule, error) {
+	uid := session.UID
+	result, complete, err := s.fetchFullSchedule(session, maxWeek)
 	if err != nil {
+		if errors.Is(err, ErrSessionExpired) {
+			s.expireUser(uid)
+		}
 		return nil, err
 	}
+	s.persistCookies(session)
 
+	s.mu.Lock()
+	s.scheduleCache[uid] = &ScheduleCache{
+		Data:   result,
+		Expire: time.Now().Add(serviceScheduleCacheTTL),
+	}
+	s.mu.Unlock()
+
+	s.recordSnapshot(uid, result, complete)
+	return result, nil
+}
+
+// recordSnapshot 与上一次完整课表比对，有变动则通知，然后保存为新快照
+func (s *JwService) recordSnapshot(uid string, cur *model.FullSchedule, complete bool) {
+	// 监控与用户请求可能同时拉到课表，串行化“读快照-比对-写快照”，避免重复通知
+	s.snapMu.Lock()
+	defer s.snapMu.Unlock()
+
+	prev, prevComplete, err := getSnapshotRecord(uid)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		slog.Warn("Load schedule snapshot failed", "uid", uid, "err", err)
+		return
+	}
+
+	if !complete {
+		// 拉取不完整（部分周请求失败）：不比对；只有在还没有快照时才保存，供 iCal 使用
+		if prev == nil {
+			if err := saveScheduleSnapshot(uid, cur, false); err != nil {
+				slog.Warn("Save schedule snapshot failed", "uid", uid, "err", err)
+			}
+		}
+		return
+	}
+
+	if prev != nil && prevComplete && prev.Semester == cur.Semester {
+		diff := diffSchedules(prev, cur, cur.CurrentWeek)
+		if !diff.Empty() {
+			slog.Info("Schedule diff detected", "uid", uid,
+				"added", len(diff.Added), "removed", len(diff.Removed), "changed", len(diff.Changed))
+			if err := saveLatestDiff(uid, diff); err != nil {
+				slog.Warn("Save schedule diff failed", "uid", uid, "err", err)
+			}
+			notifyUser(uid, EventScheduleDiff, diff.Summary(), diff)
+		}
+	}
+
+	if err := saveScheduleSnapshot(uid, cur, true); err != nil {
+		slog.Warn("Save schedule snapshot failed", "uid", uid, "err", err)
+	}
+}
+
+// fetchFullSchedule 拉取全部周的课表；complete 表示所有周都成功拉取
+func (s *JwService) fetchFullSchedule(session *Session, maxWeek int) (result *model.FullSchedule, complete bool, err error) {
 	doc, params, err := s.fetchScheduleParams(session)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	var result *model.FullSchedule
-
-	// 入口页直接是课表时，只返回当前周
+	// 入口页直接是课表时，只返回当前周（不完整，不参与变动比对）
 	if params.EntryHtml != "" {
-		parsed, _ := s.parseScheduleDoc(doc)
+		parsed, err := s.parseScheduleDoc(doc)
+		if err != nil || parsed == nil {
+			return nil, false, fmt.Errorf("课表解析失败: %v", err)
+		}
 		weeks := make([]int, 1)
 		weeks[0] = params.DQZ
 
@@ -854,6 +690,13 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 		courseMap := make(map[string]*courseWithWeeks) // 普通 map，用 mutex 保护
 		var mu sync.Mutex
 		fetchedWeeks := 0
+		failedWeeks := 0
+		loggedOut := false
+		fail := func() {
+			mu.Lock()
+			failedWeeks++
+			mu.Unlock()
+		}
 		currentWeek := params.DQZ
 		semester := ""
 		className := ""
@@ -882,6 +725,7 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 				// B3 修复：不使用共享的 resty.Client（并发不安全），改用 session.HttpClient
 				req, err := http.NewRequest("GET", baseURL+scheduleURL, nil)
 				if err != nil {
+					fail()
 					return
 				}
 				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -891,21 +735,30 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 
 				resp, err := session.HttpClient.Do(req)
 				if err != nil || resp == nil {
+					fail()
 					return
 				}
 				defer resp.Body.Close()
 
 				body, err := io.ReadAll(resp.Body)
-				if err != nil {
+				if err != nil || resp.StatusCode != http.StatusOK {
+					fail()
 					return
 				}
 
 				if !strings.Contains(string(body), "课程表") {
-					return
+					if isLoginPage(resp.Request.URL.String(), string(body)) {
+						mu.Lock()
+						loggedOut = true
+						mu.Unlock()
+						fail()
+					}
+					return // 该周无课表页（例如超出学期范围）
 				}
 
 				parsed, err := s.ParseSchedule(string(body))
 				if err != nil || parsed == nil {
+					fail()
 					return
 				}
 
@@ -923,8 +776,6 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 				if semesterStart == "" && parsed.SemesterStart != "" {
 					semesterStart = parsed.SemesterStart
 				}
-				mu.Unlock()
-
 				for _, c := range parsed.Courses {
 					key := fmt.Sprintf("%s|%s|%d|%d", c.Name, c.Teacher, c.DayOfWeek, c.PeriodStart)
 					if existing, ok := courseMap[key]; ok {
@@ -933,18 +784,34 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 						courseMap[key] = &courseWithWeeks{course: c, weeks: []int{w}}
 					}
 				}
+				mu.Unlock()
 			}(start)
 		}
 
 		wg.Wait()
 
-		mu.Lock()
+		if loggedOut {
+			return nil, false, ErrSessionExpired
+		}
+		complete = failedWeeks == 0
+
 		var courses []model.Course
 		for _, entry := range courseMap {
+			sort.Ints(entry.weeks)
 			entry.course.Weeks = entry.weeks
 			courses = append(courses, entry.course)
 		}
-		mu.Unlock()
+		// 按时间排序，保证结果稳定
+		sort.Slice(courses, func(i, j int) bool {
+			a, b := courses[i], courses[j]
+			if a.DayOfWeek != b.DayOfWeek {
+				return a.DayOfWeek < b.DayOfWeek
+			}
+			if a.PeriodStart != b.PeriodStart {
+				return a.PeriodStart < b.PeriodStart
+			}
+			return a.Name < b.Name
+		})
 
 		// 计算真实当前周
 		realCurrentWeek := currentWeek
@@ -964,35 +831,7 @@ func (s *JwService) GetFullSchedule(sessionID string, maxWeek int) (*model.FullS
 		}
 	}
 
-	// 存入缓存（含 diff 检测）
-	s.mu.Lock()
-	var prevData *model.FullSchedule
-	if existing, hasExisting := s.scheduleCache[sessionID]; hasExisting {
-		prevData = existing.Data
-	}
-	diff := computeScheduleDiff(prevData, result)
-	s.scheduleCache[sessionID] = &ScheduleCache{
-		Data:       result,
-		PrevData:   prevData,
-		LatestDiff: diff,
-		Expire:     time.Now().Add(serviceScheduleCacheTTL),
-	}
-	s.mu.Unlock()
-
-	if err := saveScheduleSnapshot(session.UID, result); err != nil {
-		slog.Warn("Save schedule snapshot failed", "uid", session.UID, "err", err)
-	}
-
-	if diff != nil && (len(diff.Added) > 0 || len(diff.Removed) > 0 || len(diff.Changed) > 0) {
-		slog.Info("Schedule diff detected",
-			"sessionID", sessionID,
-			"added", len(diff.Added),
-			"removed", len(diff.Removed),
-			"changed", len(diff.Changed))
-		go s.triggerWebhooks(session.UID, diff)
-	}
-
-	return result, nil
+	return result, complete, nil
 }
 
 type courseWithWeeks struct {
@@ -1002,11 +841,9 @@ type courseWithWeeks struct {
 
 // GetCachedSemesters 从成绩缓存中提取学期列表（P4 修复）
 func (s *JwService) GetCachedSemesters(sessionID string) ([]string, error) {
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("session 不存在")
+	session, err := s.checkSession(sessionID)
+	if err != nil {
+		return nil, err
 	}
 
 	s.mu.RLock()
@@ -1269,7 +1106,36 @@ type scorePageResp struct {
 // jar cookie jar 实现
 type jar struct {
 	cookies map[string][]*http.Cookie
+	dirty   bool // 自上次持久化以来是否有新 cookie
 	mu      sync.Mutex
+}
+
+// Export 导出全部 cookie（用于持久化）
+func (j *jar) Export() map[string][]*http.Cookie {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	out := make(map[string][]*http.Cookie, len(j.cookies))
+	for host, list := range j.cookies {
+		out[host] = append([]*http.Cookie(nil), list...)
+	}
+	return out
+}
+
+// Import 导入持久化的 cookie
+func (j *jar) Import(cookies map[string][]*http.Cookie) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.cookies = cookies
+	j.dirty = false
+}
+
+// TakeDirty 返回是否有未持久化的变化，并清除标记
+func (j *jar) TakeDirty() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	d := j.dirty
+	j.dirty = false
+	return d
 }
 
 func (j *jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
@@ -1292,6 +1158,7 @@ func (j *jar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 		merged = append(merged, c)
 	}
 	j.cookies[u.Host] = merged
+	j.dirty = true
 }
 
 func (j *jar) Cookies(u *url.URL) []*http.Cookie {

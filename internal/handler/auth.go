@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -26,6 +27,15 @@ func getSessionID(c *gin.Context) (string, bool) {
 func getUID(c *gin.Context) (string, bool) {
 	uid := c.GetString("uid")
 	return uid, uid != ""
+}
+
+// serviceError 统一返回 service 层错误；教务登录失效时返回 401 + JW_SESSION_EXPIRED，前端据此跳转登录页
+func serviceError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrSessionExpired) {
+		response.ErrorWithCode(c, http.StatusUnauthorized, err.Error(), "JW_SESSION_EXPIRED")
+		return
+	}
+	response.Error(c, http.StatusInternalServerError, err.Error())
 }
 
 type AuthHandler struct {
@@ -183,6 +193,10 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 			tokenSvc := service.GetTokenService()
 			tokenSvc.RevokeRefreshToken(claims.TokenID, claims.UID)
 		}
+	}
+
+	if uid, ok := getUID(c); ok {
+		service.GetJwService().Logout(uid)
 	}
 
 	c.SetCookie("refreshToken", "", -1, "/", "", h.secureCookie, true)

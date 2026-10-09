@@ -47,11 +47,14 @@ func do(r *gin.Engine, method, path, body string) *httptest.ResponseRecorder {
 func TestSubscribeICalUsesSnapshot(t *testing.T) {
 	r, mr := setupRouter(t, "2024001")
 
-	snap, _ := json.Marshal(&model.FullSchedule{
-		StudentName:   "张三",
-		SemesterStart: "2026-09-07",
-		Courses: []model.Course{
-			{Name: "高等数学", Room: "A101", DayOfWeek: 1, PeriodStart: 1, Periods: 2, Weeks: []int{1}},
+	snap, _ := json.Marshal(map[string]interface{}{
+		"complete": true,
+		"schedule": &model.FullSchedule{
+			StudentName:   "张三",
+			SemesterStart: "2026-09-07",
+			Courses: []model.Course{
+				{Name: "高等数学", Room: "A101", DayOfWeek: 1, PeriodStart: 1, Periods: 2, Weeks: []int{1}},
+			},
 		},
 	})
 	mr.Set("schedule:snapshot:2024001", string(snap))

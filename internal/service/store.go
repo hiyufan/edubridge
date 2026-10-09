@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -85,9 +86,15 @@ func GetUserICalToken(uid string) (string, time.Time, error) {
 	return token, time.Now().Add(ttl), nil
 }
 
-// saveScheduleSnapshot 保存用户最近一次完整课表，供 iCal 订阅在无登录会话时使用
-func saveScheduleSnapshot(uid string, schedule *model.FullSchedule) error {
-	data, err := json.Marshal(schedule)
+// snapshotRecord 课表快照；Complete 表示所有周都成功拉取，只有完整快照才参与变动比对
+type snapshotRecord struct {
+	Schedule *model.FullSchedule `json:"schedule"`
+	Complete bool                `json:"complete"`
+}
+
+// saveScheduleSnapshot 保存用户最近一次课表，供变动比对和 iCal 订阅（无登录会话时）使用
+func saveScheduleSnapshot(uid string, schedule *model.FullSchedule, complete bool) error {
+	data, err := json.Marshal(&snapshotRecord{Schedule: schedule, Complete: complete})
 	if err != nil {
 		return err
 	}
@@ -96,22 +103,30 @@ func saveScheduleSnapshot(uid string, schedule *model.FullSchedule) error {
 	return database.GetRedis().Set(ctx, scheduleSnapPrefix+uid, data, scheduleSnapshotTTL).Err()
 }
 
-// GetScheduleSnapshot 读取用户最近一次完整课表
-func GetScheduleSnapshot(uid string) (*model.FullSchedule, error) {
+func getSnapshotRecord(uid string) (*model.FullSchedule, bool, error) {
 	ctx, cancel := storeCtx()
 	defer cancel()
 	data, err := database.GetRedis().Get(ctx, scheduleSnapPrefix+uid).Bytes()
 	if errors.Is(err, redis.Nil) {
-		return nil, ErrNotFound
+		return nil, false, ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	var schedule model.FullSchedule
-	if err := json.Unmarshal(data, &schedule); err != nil {
-		return nil, err
+	var rec snapshotRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return nil, false, err
 	}
-	return &schedule, nil
+	if rec.Schedule == nil { // 旧格式快照，视为不存在
+		return nil, false, ErrNotFound
+	}
+	return rec.Schedule, rec.Complete, nil
+}
+
+// GetScheduleSnapshot 读取用户最近一次课表
+func GetScheduleSnapshot(uid string) (*model.FullSchedule, error) {
+	schedule, _, err := getSnapshotRecord(uid)
+	return schedule, err
 }
 
 // SaveWebhook 注册（覆盖）用户的 webhook
@@ -141,4 +156,124 @@ func GetWebhook(uid string) (*WebhookEntry, error) {
 		return nil, err
 	}
 	return &entry, nil
+}
+
+// ---- 教务登录态 ----
+
+const (
+	jwCookiesPrefix = "jw:cookies:" // uid -> cookies JSON
+	jwSIDPrefix     = "jw:sid:"     // 前端 sessionID -> uid
+	jwMonitorUsers  = "jw:monitor:users"
+	scheduleDiffKey = "schedule:diff:"    // uid -> 最近一次 ScheduleDiff JSON
+	jwSIDTTL        = 30 * 24 * time.Hour // 与 refresh token 有效期一致
+	scheduleDiffTTL = 30 * 24 * time.Hour
+)
+
+func saveJwCookies(uid string, cookies map[string][]*http.Cookie) error {
+	data, err := json.Marshal(cookies)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := storeCtx()
+	defer cancel()
+	return database.GetRedis().Set(ctx, jwCookiesPrefix+uid, data, 0).Err()
+}
+
+func loadJwCookies(uid string) (map[string][]*http.Cookie, error) {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	data, err := database.GetRedis().Get(ctx, jwCookiesPrefix+uid).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var cookies map[string][]*http.Cookie
+	if err := json.Unmarshal(data, &cookies); err != nil {
+		return nil, err
+	}
+	return cookies, nil
+}
+
+func deleteJwCookies(uid string) error {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	return database.GetRedis().Del(ctx, jwCookiesPrefix+uid).Err()
+}
+
+func bindSessionID(sessionID, uid string) error {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	return database.GetRedis().Set(ctx, jwSIDPrefix+sessionID, uid, jwSIDTTL).Err()
+}
+
+func lookupSessionID(sessionID string) (string, error) {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	rdb := database.GetRedis()
+	uid, err := rdb.Get(ctx, jwSIDPrefix+sessionID).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	rdb.Expire(ctx, jwSIDPrefix+sessionID, jwSIDTTL) // 使用即续期
+	return uid, nil
+}
+
+func addMonitorUser(uid string) error {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	return database.GetRedis().SAdd(ctx, jwMonitorUsers, uid).Err()
+}
+
+// removeMonitorUser 返回该用户此前是否在监控列表中
+func removeMonitorUser(uid string) (bool, error) {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	n, err := database.GetRedis().SRem(ctx, jwMonitorUsers, uid).Result()
+	return n > 0, err
+}
+
+func monitorUsers() ([]string, error) {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	return database.GetRedis().SMembers(ctx, jwMonitorUsers).Result()
+}
+
+// IsMonitored 用户是否处于课表监控中
+func IsMonitored(uid string) (bool, error) {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	return database.GetRedis().SIsMember(ctx, jwMonitorUsers, uid).Result()
+}
+
+func saveLatestDiff(uid string, diff *ScheduleDiff) error {
+	data, err := json.Marshal(diff)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := storeCtx()
+	defer cancel()
+	return database.GetRedis().Set(ctx, scheduleDiffKey+uid, data, scheduleDiffTTL).Err()
+}
+
+// GetLatestDiff 获取用户最近一次检测到的课表变动
+func GetLatestDiff(uid string) (*ScheduleDiff, error) {
+	ctx, cancel := storeCtx()
+	defer cancel()
+	data, err := database.GetRedis().Get(ctx, scheduleDiffKey+uid).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var diff ScheduleDiff
+	if err := json.Unmarshal(data, &diff); err != nil {
+		return nil, err
+	}
+	return &diff, nil
 }

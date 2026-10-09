@@ -197,11 +197,15 @@ onMounted(async () => {
     try {
       const diffRes = await request.get('/schedule/diff')
       const diff = diffRes.data
-      if (diff && (diff.added?.length || diff.removed?.length || diff.changed?.length)) {
+      // 同一次变动只提示一次
+      let seen = ''
+      try { seen = localStorage.getItem('schedule_diff_seen') || '' } catch {}
+      if (diff && diff.detectedAt !== seen && (diff.added?.length || diff.removed?.length || diff.changed?.length)) {
+        try { localStorage.setItem('schedule_diff_seen', diff.detectedAt) } catch {}
         const msgs = []
-        if (diff.added?.length) msgs.push(`新增 ${diff.added.length} 门课程`)
-        if (diff.removed?.length) msgs.push(`删除 ${diff.removed.length} 门课程`)
-        if (diff.changed?.length) msgs.push(`变更 ${diff.changed.length} 处`)
+        if (diff.added?.length) msgs.push(`加课 ${diff.added.length} 节`)
+        if (diff.removed?.length) msgs.push(`减课/停课 ${diff.removed.length} 节`)
+        if (diff.changed?.length) msgs.push(`调整 ${diff.changed.length} 节`)
         ElNotification({
           title: '课表有变动',
           message: msgs.join('、'),

@@ -26,7 +26,7 @@ func (h *ScheduleHandler) GenerateICalToken(c *gin.Context) {
 
 	// 先拉一次课表，确保订阅时 Redis 里有课表快照
 	if _, err := service.GetJwService().GetFullSchedule(sessionIDStr, 20); err != nil {
-		response.Error(c, http.StatusInternalServerError, "获取课表失败")
+		serviceError(c, err)
 		return
 	}
 
@@ -95,8 +95,8 @@ func (h *ScheduleHandler) GetICal(c *gin.Context) {
 
 	jwSvc := service.GetJwService()
 	fullSchedule, err := jwSvc.GetFullSchedule(sessionIDStr, 20)
-	if err != nil || fullSchedule == nil {
-		response.Error(c, http.StatusInternalServerError, "获取课表失败")
+	if err != nil {
+		serviceError(c, err)
 		return
 	}
 

@@ -46,13 +46,13 @@ func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 		var err error
 		html, err = jwSvc.GetSchedulePage(sessionIDStr, nil)
 		if err != nil {
-			response.Error(c, http.StatusInternalServerError, err.Error())
+			serviceError(c, err)
 			return
 		}
 
 		parsed, err = jwSvc.ParseSchedule(html)
 		if err != nil {
-			response.Error(c, http.StatusInternalServerError, err.Error())
+			serviceError(c, err)
 			return
 		}
 
@@ -66,12 +66,12 @@ func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 		if parsed.Week != realCurrentWeek || len(parsed.Courses) == 0 {
 			html, err = jwSvc.GetSchedulePage(sessionIDStr, &realCurrentWeek)
 			if err != nil {
-				response.Error(c, http.StatusInternalServerError, err.Error())
+				serviceError(c, err)
 				return
 			}
 			parsed, err = jwSvc.ParseSchedule(html)
 			if err != nil {
-				response.Error(c, http.StatusInternalServerError, err.Error())
+				serviceError(c, err)
 				return
 			}
 		}
@@ -83,13 +83,13 @@ func (h *ScheduleHandler) GetSchedule(c *gin.Context) {
 
 	html, err := jwSvc.GetSchedulePage(sessionIDStr, week)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 
 	schedule, err := jwSvc.ParseSchedule(html)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 
@@ -121,7 +121,7 @@ func (h *ScheduleHandler) GetFullSchedule(c *gin.Context) {
 	jwSvc := service.GetJwService()
 	schedule, err := jwSvc.GetFullSchedule(sessionIDStr, maxWeek)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 

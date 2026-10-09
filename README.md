@@ -6,7 +6,8 @@
 
 ## 功能特性
 
-- 🔐 **安全登录** — 验证码 + JWT 双 Token 认证，支持 Token 自动刷新
+- 🔐 **安全登录** — 验证码 + JWT 双 Token 认证，支持 Token 自动刷新；教务登录态持久化到 Redis，服务重启不掉线
+- 👀 **课表监控** — 后台定时检查课表，发现加课、减课/停课、换教室时推送通知，并保持教务登录不过期
 - 📅 **课表查询** — 按周切换，自动识别当前周，支持全学期课表
 - ⚠️ **冲突检测** — 自动检测同一时段重复安排的课程
 - 📊 **成绩查询** — 按学期筛选，显示学分、绩点等详细数据
@@ -14,7 +15,7 @@
 - 🧭 **今日课表** — 首页快速查看当天课程
 - 📱 **响应式设计** — 支持手机和桌面端
 - 🗓️ **iCal 订阅** — 生成标准 iCalendar 格式，可导入 Google Calendar/Apple Calendar/Outlook
-- 🔔 **Webhook 通知** — 成绩/课表变动时自动推送到指定 URL
+- 🔔 **Webhook 通知** — 课表变动、教务登录失效时推送到指定 URL（格式见下文）
 
 ## 技术栈
 
@@ -129,10 +130,29 @@ jww.p/
 | `/api/score` | GET | 成绩（参数: `semester`） |
 | `/api/score/stats` | GET | 成绩统计（GPA、学分、挂科等） |
 | `/api/score/semesters` | GET | 可选学期列表 |
-| `/api/webhook` | GET | 查询已注册的 Webhook |
-| `/api/webhook` | POST | 注册 Webhook 回调 URL |
-| `/api/webhook/{id}` | DELETE | 删除指定 Webhook |
-| `/api/webhook/info` | GET | 获取 Webhook 签名密钥（仅首次） |
+| `/api/schedule/diff` | GET | 最近一次检测到的课表变动 |
+| `/api/monitor/status` | GET | 课表监控状态 |
+| `/api/webhook/register` | POST | 注册 Webhook（`url`, `secret`） |
+| `/api/webhook/info` | GET | 查询已注册的 Webhook |
+| `/api/webhook/trigger` | POST | 把最近一次课表变动重新推送一次 |
+| `/api/notify/test` | POST | 发送测试通知 |
+
+### 课表监控与 Webhook
+
+登录后用户自动进入监控列表：每 `MONITOR_KEEPALIVE_INTERVAL` 访问一次教务系统保持登录，每 `MONITOR_CHECK_INTERVAL` 拉取一次完整课表并与上次比对（只比对当前周及以后）。部分周拉取失败时本次不比对，避免误报。教务登录失效时停止监控并推送 `session-expired`，用户重新登录后自动恢复。
+
+Webhook 请求为 `POST application/json`，请求头 `X-JWW-Event` 为事件类型，配置了密钥时带 `X-Hub-Signature-256: sha256=<HMAC-SHA256(body)>`：
+
+```json
+{
+  "event": "schedule-diff",
+  "text": "课表有变动：\n【加课】\n+ 大学物理 周三 第1-2节 @B202（第4周）\n【减课/停课】\n- 高等数学 周一 第1-2节 @A101（第5、6周）",
+  "data": { "added": [...], "removed": [...], "changed": [...], "detectedAt": "..." },
+  "time": "2026-10-09T08:00:00+08:00"
+}
+```
+
+`event` 取值：`schedule-diff`（课表变动）、`session-expired`（需要重新登录）、`test`（测试）。`text` 可直接转发到微信/群机器人。
 
 ### 登录请求示例
 
@@ -208,6 +228,8 @@ server {
 | `JWT_SECRET` | ✅ | — | Access Token 签名密钥 |
 | `JWT_REFRESH_SECRET` | ✅ | — | Refresh Token 签名密钥（不可与 JWT_SECRET 相同） |
 | `PORT` | ❌ | `3000` | 服务端口 |
+| `MONITOR_KEEPALIVE_INTERVAL` | ❌ | `10m` | 保持教务登录的访问间隔，需小于学校会话超时时间 |
+| `MONITOR_CHECK_INTERVAL` | ❌ | `1h` | 完整拉取课表比对变动的间隔 |
 
 ## 相关文档
 

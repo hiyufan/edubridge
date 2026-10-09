@@ -76,7 +76,7 @@ func TestScheduleSnapshotRoundTrip(t *testing.T) {
 			{Name: "高等数学", DayOfWeek: 1, PeriodStart: 1, Periods: 2, Weeks: []int{1, 2, 3}},
 		},
 	}
-	if err := saveScheduleSnapshot("2024001", in); err != nil {
+	if err := saveScheduleSnapshot("2024001", in, true); err != nil {
 		t.Fatal(err)
 	}
 	out, err := GetScheduleSnapshot("2024001")

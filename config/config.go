@@ -1,7 +1,9 @@
 package config
 
 import (
+	"log"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -10,8 +12,12 @@ type Config struct {
 	JWTRefreshSecret string
 	AllowedOrigin    string
 	SecureCookie     bool
-	MySQL            MySQLConfig
-	Redis            RedisConfig
+	// MonitorKeepalive 访问教务系统保持登录的间隔（需小于学校会话超时时间）
+	MonitorKeepalive time.Duration
+	// MonitorCheck 完整拉取课表比对变动的间隔
+	MonitorCheck time.Duration
+	MySQL        MySQLConfig
+	Redis        RedisConfig
 }
 
 type MySQLConfig struct {
@@ -82,6 +88,8 @@ func Load() *Config {
 	redisDB := 0
 
 	return &Config{
+		MonitorKeepalive: durationEnv("MONITOR_KEEPALIVE_INTERVAL", 10*time.Minute),
+		MonitorCheck:     durationEnv("MONITOR_CHECK_INTERVAL", time.Hour),
 		Port:             port,
 		JWTSecret:        jwtSecret,
 		JWTRefreshSecret: jwtRefreshSecret,
@@ -101,4 +109,17 @@ func Load() *Config {
 			DB:       redisDB,
 		},
 	}
+}
+
+func durationEnv(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < time.Minute {
+		log.Printf("invalid %s=%q, using default %s", key, v, def)
+		return def
+	}
+	return d
 }

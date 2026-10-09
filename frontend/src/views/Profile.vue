@@ -62,6 +62,14 @@ const regenerateICalToken = async () => {
   }
 }
 
+// 发送测试通知，确认通知渠道可用
+const testNotify = async () => {
+  try {
+    await request.post('/notify/test')
+    ElMessage.success('测试通知已发送')
+  } catch {}
+}
+
 // 功能 09: 保存 Webhook
 const saveWebhook = async () => {
   if (!webhookUrl.value) {
@@ -370,6 +378,17 @@ const getAvatarLetter = () => {
           </div>
           <div class="item-content">
             <span class="item-label" style="color:#007AFF;">保存 Webhook 配置</span>
+          </div>
+        </div>
+        <div v-if="webhookInfo?.registered" class="apple-grouped-item item-clickable" @click="testNotify">
+          <div class="item-icon" style="background:rgba(0,122,255,0.1);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </div>
+          <div class="item-content">
+            <span class="item-label" style="color:#007AFF;">发送测试通知</span>
           </div>
         </div>
         <!-- Webhook 历史 -->

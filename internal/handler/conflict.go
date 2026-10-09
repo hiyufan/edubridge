@@ -28,7 +28,7 @@ func (h *ScheduleHandler) GetConflicts(c *gin.Context) {
 	jwSvc := service.GetJwService()
 	fullSchedule, err := jwSvc.GetFullSchedule(sessionIDStr, 20)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 

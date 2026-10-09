@@ -100,6 +100,15 @@ request.interceptors.response.use(
   async (error) => {
     const originalConfig = error.config
 
+    // 教务系统登录已失效（JWT 仍有效，刷新也没用）：回到登录页重新输入验证码
+    if (error.response?.data?.code === 'JW_SESSION_EXPIRED') {
+      const userStore = useUserStore()
+      userStore.logout()
+      ElMessage.warning(error.response.data.info || '教务系统登录已失效，请重新登录')
+      router.push('/login')
+      return Promise.reject(error)
+    }
+
     if (error.response?.status === 401 && !originalConfig._retry) {
       originalConfig._retry = true
 

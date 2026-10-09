@@ -153,8 +153,8 @@ func main() {
 			protected.GET("/score/semesters", scoreHandler.GetSemesters)
 			protected.GET("/score/stats", scoreHandler.GetScoreStats)
 
-			protected.POST("/notify/register", notifyHandler.RegisterToken)
 			protected.POST("/notify/test", notifyHandler.TestNotify)
+			protected.GET("/monitor/status", notifyHandler.MonitorStatus)
 
 			protected.GET("/schedule/ical", scheduleHandler.GetICal)
 			protected.POST("/schedule/ical/token", scheduleHandler.GenerateICalToken)
@@ -174,6 +174,8 @@ func main() {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{"name": "jw-server-go", "version": "1.0.0"})
 	})
+
+	service.GetJwService().StartMonitor(cfg.MonitorKeepalive, cfg.MonitorCheck)
 
 	log.Printf("Server starting on http://localhost:%s", cfg.Port)
 

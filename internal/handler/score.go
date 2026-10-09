@@ -31,7 +31,7 @@ func (h *ScoreHandler) GetScore(c *gin.Context) {
 	jwSvc := service.GetJwService()
 	scores, err := jwSvc.GetScorePage(sessionIDStr, semester)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 
@@ -57,7 +57,7 @@ func (h *ScoreHandler) GetSemesters(c *gin.Context) {
 	// 缓存未命中，走原有逻辑
 	scores, err := jwSvc.GetScorePage(sessionIDStr, "")
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 
@@ -114,7 +114,7 @@ func (h *ScoreHandler) GetScoreStats(c *gin.Context) {
 	jwSvc := service.GetJwService()
 	scores, err := jwSvc.GetScorePage(sessionIDStr, "")
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 
